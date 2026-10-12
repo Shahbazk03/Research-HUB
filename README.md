@@ -251,3 +251,4 @@ Both frontend and backend codebases have undergone strict automated validation:
 <div align="center">
   <sub>Engineered with precision for modern academic research advisory and enterprise software engineering excellence.</sub>
 </div>
+<!-- vercel-deploy-trigger: production release -->
