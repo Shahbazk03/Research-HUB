@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "echo 'Build successful'",
+    "build": "cd Client && npm install && npm run build && node -e \"const fs=require('fs'); fs.cpSync('dist', '../dist', {recursive: true})\"",
     "start": "node server/dist/server.js"
   },
   "dependencies": {
