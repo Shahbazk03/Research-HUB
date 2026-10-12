@@ -112,13 +112,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ navigate, redirect }) => {
             )}
           </button>
         </form>
-
-        {/* Demo credentials hint */}
-        <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 text-[11px] text-slate-400 space-y-1">
-          <p className="font-semibold text-slate-300">Demo Admin Credentials:</p>
-          <p>Email: <span className="text-indigo-400 select-all">shahbaz@example.com</span> | Pass: <span className="text-indigo-400 select-all">admin@123</span></p>
-        </div>
-
         <div className="text-center pt-2 border-t border-slate-800/80 text-xs text-slate-400">
           <span>Don't have an account yet? </span>
           <button
