@@ -4,8 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "cd server && npm install && npm run build",
-    "prestart": "cd server && npm install && npm run build",
+    "build": "cd server && npm install --omit=dev",
     "start": "node server/dist/server.js"
   }
 }
