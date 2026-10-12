@@ -55,8 +55,10 @@ router.post("/", authenticate, async (req: Request, res: Response): Promise<void
         const buffer = Buffer.from(cleanBase64, "base64");
         await fs.writeFile(filePath, buffer);
 
-        // Serve URL - using relative /uploads/... so frontend apiClient or browser can fetch directly
-        const fileUrl = `http://localhost:5000/uploads/${safeFolder}/${safeFilename}`;
+        // Serve URL - dynamic host so it works in both local and deployed production environments
+        const host = req.get("host") || "localhost:5000";
+        const protocol = req.protocol === "https" || req.get("x-forwarded-proto") === "https" ? "https" : "http";
+        const fileUrl = `${protocol}://${host}/uploads/${safeFolder}/${safeFilename}`;
 
         res.status(200).json({
             success: true,

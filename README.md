@@ -238,7 +238,7 @@ Both frontend and backend codebases have undergone strict automated validation:
 
 ## 👨‍💻 Author & Connect
 
-**Mohd Shahbaz**  
+**Mohd Shahbaz Khan**  
 *Full Stack Software Engineer | React, Node.js & Scalable Web Architecture*
 
 - **GitHub:** [@Shahbazk03](https://github.com/Shahbazk03)

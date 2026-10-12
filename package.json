@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "cd server && npm install && npm run build",
-    "start": "cd server && npm start"
+    "prestart": "cd server && npm install && npm run build",
+    "start": "node server/dist/server.js"
   }
 }
