@@ -11,6 +11,8 @@ import adminRoutes from "./routes/admin.routes.js";
 import publicRoutes from "./routes/public.routes.js";
 import uploadRoutes from "./routes/upload.routes.js";
 const app = express();
+// Required when app runs behind Render/Vercel reverse proxy so X-Forwarded-* headers are trusted
+app.set("trust proxy", 1);
 /*
 |--------------------------------------------------------------------------
 | Security & Middlewares

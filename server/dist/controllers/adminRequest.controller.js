@@ -15,6 +15,40 @@ const getParamString = (value) => {
     }
     return value;
 };
+export const escapeRegExp = (value) => {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+};
+export const buildAdminRequestSearchFilter = (search) => {
+    const searchValue = search?.trim();
+    if (!searchValue) {
+        return {};
+    }
+    const escaped = escapeRegExp(searchValue);
+    const referenceLike = /(?:^|[-\s])rh[-\s]?\d|^\d{3,}$|^rh[-\s]?\d/i.test(searchValue);
+    if (referenceLike) {
+        return {
+            $or: [
+                { requestNumber: { $regex: `^${escaped}$`, $options: "i" } },
+                { requestNumber: { $regex: escaped, $options: "i" } },
+            ],
+        };
+    }
+    return {
+        $or: [
+            { requestNumber: { $regex: escaped, $options: "i" } },
+            { "customer.email": { $regex: escaped, $options: "i" } },
+            { "customer.name": { $regex: escaped, $options: "i" } },
+            { "customer.phone": { $regex: escaped, $options: "i" } },
+            { "customer.whatsapp": { $regex: escaped, $options: "i" } },
+            { "requirements.research_topic": { $regex: escaped, $options: "i" } },
+            { "requirements.topic": { $regex: escaped, $options: "i" } },
+            { "requirements.title": { $regex: escaped, $options: "i" } },
+            { "requirements.working_title": { $regex: escaped, $options: "i" } },
+            { "requirements.paper_title": { $regex: escaped, $options: "i" } },
+            { additionalMessage: { $regex: escaped, $options: "i" } },
+        ],
+    };
+};
 /*
 |--------------------------------------------------------------------------
 | Allowed Statuses
@@ -58,7 +92,7 @@ const ALLOWED_CONTACT_METHODS = [
 */
 export const getAdminServiceRequests = async (req, res, next) => {
     try {
-        const { status, serviceId, page = "1", limit = "20", } = req.query;
+        const { status, serviceId, search, page = "1", limit = "20", } = req.query;
         /*
         |--------------------------------------------------------------------------
         | Pagination
@@ -107,6 +141,9 @@ export const getAdminServiceRequests = async (req, res, next) => {
             }
             filter.serviceId = serviceIdValue;
         }
+        const searchValue = getParamString(search);
+        const searchFilter = buildAdminRequestSearchFilter(searchValue);
+        Object.assign(filter, searchFilter);
         /*
         |--------------------------------------------------------------------------
         | Fetch Requests

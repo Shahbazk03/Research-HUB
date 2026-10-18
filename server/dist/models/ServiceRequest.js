@@ -88,6 +88,27 @@ const serviceRequestSchema = new Schema({
         discipline: String,
         university: String,
         department: String,
+        correspondingAuthor: {
+            name: String,
+            designation: String,
+            email: String,
+            orcidId: String,
+        },
+        coAuthors: [
+            {
+                _id: false,
+                name: String,
+                designation: String,
+                email: String,
+                orcidId: String,
+            },
+        ],
+        supervisor: {
+            name: String,
+            designation: String,
+            email: String,
+            orcidId: String,
+        },
         publicationType: String,
         targetJournal: String,
         targetConference: String,
@@ -184,6 +205,15 @@ const serviceRequestSchema = new Schema({
         doiUrl: String,
         notes: String,
         uploadedAt: Date,
+    },
+    referral: {
+        code: { type: String, trim: true, uppercase: true },
+        referrerName: { type: String, trim: true },
+        discountAmount: Number,
+        originalAmount: Number,
+        finalAmount: Number,
+        currency: { type: String, default: "INR" },
+        appliedAt: Date,
     },
     assignedTo: {
         type: Schema.Types.ObjectId,

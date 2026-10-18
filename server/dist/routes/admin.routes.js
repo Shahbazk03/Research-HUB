@@ -12,6 +12,7 @@ import { getAdminUsers, updateAdminUserStatus, updateAdminUserRole, resetAdminUs
 import { getAdminSettings, updateAdminSettings, } from "../controllers/adminSettings.controller.js";
 import { getAdminFaqs, createAdminFaq, updateAdminFaq, deleteAdminFaq, } from "../controllers/adminCms.controller.js";
 import { getAdminReferenceData, updateAdminReferenceData, } from "../controllers/adminReferenceData.controller.js";
+import { getAdminReferralCodes, createAdminReferralCode, updateAdminReferralCode, deleteAdminReferralCode, } from "../controllers/adminReferral.controller.js";
 const router = Router();
 // Protect all admin routes with authentication and staff/admin role check
 router.use(authenticate, requireStaff);
@@ -89,5 +90,12 @@ router.delete("/cms/faqs/:id", requireAdmin, deleteAdminFaq);
 /* -------------------------------------------------------------------------- */
 router.get("/reference-data", getAdminReferenceData);
 router.put("/reference-data/:key", requireAdmin, updateAdminReferenceData);
+/* -------------------------------------------------------------------------- */
+/* Referral Codes Management                                                  */
+/* -------------------------------------------------------------------------- */
+router.get("/referrals", getAdminReferralCodes);
+router.post("/referrals", requireAdmin, createAdminReferralCode);
+router.put("/referrals/:id", requireAdmin, updateAdminReferralCode);
+router.delete("/referrals/:id", requireAdmin, deleteAdminReferralCode);
 export default router;
 //# sourceMappingURL=admin.routes.js.map

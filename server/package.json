@@ -7,7 +7,7 @@
   "main": "dist/server.js",
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "node -e \"console.log('Precompiled bundle ready')\"",
+    "build": "tsc",
     "build:ts": "tsc",
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit"

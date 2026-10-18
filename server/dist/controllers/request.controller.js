@@ -3,6 +3,9 @@ import ServiceRequest from "../models/ServiceRequest.js";
 import Service from "../models/Service.js";
 import RequirementTemplate from "../models/RequirementTemplate.js";
 import RequirementField from "../models/RequirementField.js";
+import ReferralCode from "../models/ReferralCode.js";
+import { validateAcademicProfileAuthors } from "../utils/requestAuthorValidation.js";
+import { calculateReferralDiscount, normalizeReferralCode } from "../utils/referralValidation.js";
 import { USER_ROLES } from "../types/roles.js";
 const toStr = (val) => (Array.isArray(val) ? String(val[0] || "") : String(val || ""));
 const generateRequestNumber = () => {
@@ -20,6 +23,14 @@ export const createServiceRequest = async (req, res, next) => {
             return;
         }
         const { name, email, phone, whatsapp, serviceId, domainId, categoryId, templateId, academicProfile, requirements = {}, referenceFiles = [], additionalMessage, preferredContactMethod = "WHATSAPP", } = req.body;
+        const authorValidationError = validateAcademicProfileAuthors(academicProfile);
+        if (authorValidationError) {
+            res.status(400).json({
+                success: false,
+                message: authorValidationError,
+            });
+            return;
+        }
         if (!serviceId || !mongoose.Types.ObjectId.isValid(serviceId)) {
             res.status(400).json({
                 success: false,
@@ -334,7 +345,7 @@ export const submitCustomerPayment = async (req, res, next) => {
             return;
         }
         const id = toStr(req.params.id);
-        const { transactionId, amountPaid, currency = "INR", payerName, payerUpiId, screenshotUrl, notes, } = req.body;
+        const { transactionId, amountPaid, currency = "INR", payerName, payerUpiId, screenshotUrl, notes, referralCode, } = req.body;
         if (!transactionId || typeof transactionId !== "string" || !transactionId.trim()) {
             res.status(400).json({
                 success: false,
@@ -353,9 +364,45 @@ export const submitCustomerPayment = async (req, res, next) => {
             });
             return;
         }
+        const normalizedReferralCode = normalizeReferralCode(referralCode);
+        let referralPayload;
+        if (normalizedReferralCode) {
+            const referralRecord = await ReferralCode.findOne({
+                code: normalizedReferralCode,
+                isActive: true,
+            });
+            if (!referralRecord) {
+                res.status(400).json({
+                    success: false,
+                    message: "Referral code is invalid or inactive",
+                });
+                return;
+            }
+            const baseAmount = Number(serviceRequest.quotation?.amount ?? 0) || 0;
+            const calculated = calculateReferralDiscount({
+                code: referralRecord.code,
+                referrerName: referralRecord.referrerName,
+                discountAmount: referralRecord.discountAmount,
+                baseAmount,
+                currency: serviceRequest.quotation?.currency || currency || "INR",
+            });
+            referralPayload = {
+                code: calculated.code,
+                referrerName: calculated.referrerName,
+                discountAmount: calculated.discountAmount,
+                originalAmount: calculated.originalAmount,
+                finalAmount: calculated.finalAmount,
+                currency: calculated.currency,
+                appliedAt: new Date(),
+            };
+        }
+        const paymentAmount = referralPayload
+            ? referralPayload.finalAmount
+            : Number(amountPaid) || (serviceRequest.quotation?.amount || 0);
+        serviceRequest.referral = referralPayload;
         serviceRequest.paymentSubmission = {
             transactionId: transactionId.trim(),
-            amountPaid: Number(amountPaid) || (serviceRequest.quotation?.amount || 0),
+            amountPaid: paymentAmount,
             currency: currency || serviceRequest.quotation?.currency || "INR",
             payerName: payerName ? String(payerName).trim() : serviceRequest.customer.name,
             payerUpiId: payerUpiId ? String(payerUpiId).trim() : "",

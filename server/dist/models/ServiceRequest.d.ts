@@ -21,6 +21,24 @@ export interface IServiceRequest extends Document {
         discipline?: string;
         university?: string;
         department?: string;
+        correspondingAuthor?: {
+            name?: string;
+            designation?: string;
+            email?: string;
+            orcidId?: string;
+        };
+        coAuthors?: Array<{
+            name?: string;
+            designation?: string;
+            email?: string;
+            orcidId?: string;
+        }>;
+        supervisor?: {
+            name?: string;
+            designation?: string;
+            email?: string;
+            orcidId?: string;
+        };
         publicationType?: string;
         targetJournal?: string;
         targetConference?: string;
@@ -72,6 +90,15 @@ export interface IServiceRequest extends Document {
         doiUrl?: string;
         notes?: string;
         uploadedAt?: Date;
+    };
+    referral?: {
+        code: string;
+        referrerName: string;
+        discountAmount: number;
+        originalAmount: number;
+        finalAmount: number;
+        currency: string;
+        appliedAt: Date;
     };
     assignedTo?: mongoose.Types.ObjectId;
     createdAt: Date;
