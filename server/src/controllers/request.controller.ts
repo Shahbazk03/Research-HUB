@@ -5,6 +5,9 @@ import ServiceRequest from "../models/ServiceRequest.js";
 import Service from "../models/Service.js";
 import RequirementTemplate from "../models/RequirementTemplate.js";
 import RequirementField from "../models/RequirementField.js";
+import ReferralCode from "../models/ReferralCode.js";
+import { validateAcademicProfileAuthors } from "../utils/requestAuthorValidation.js";
+import { calculateReferralDiscount, normalizeReferralCode } from "../utils/referralValidation.js";
 import { USER_ROLES } from "../types/roles.js";
 
 const toStr = (val: unknown): string => (Array.isArray(val) ? String(val[0] || "") : String(val || ""));
@@ -44,6 +47,15 @@ export const createServiceRequest = async (
             additionalMessage,
             preferredContactMethod = "WHATSAPP",
         } = req.body;
+
+        const authorValidationError = validateAcademicProfileAuthors(academicProfile);
+        if (authorValidationError) {
+            res.status(400).json({
+                success: false,
+                message: authorValidationError,
+            });
+            return;
+        }
 
         if (!serviceId || !mongoose.Types.ObjectId.isValid(serviceId)) {
             res.status(400).json({
@@ -433,6 +445,7 @@ export const submitCustomerPayment = async (
             payerUpiId,
             screenshotUrl,
             notes,
+            referralCode,
         } = req.body;
 
         if (!transactionId || typeof transactionId !== "string" || !transactionId.trim()) {
@@ -456,9 +469,51 @@ export const submitCustomerPayment = async (
             return;
         }
 
+        const normalizedReferralCode = normalizeReferralCode(referralCode);
+        let referralPayload: typeof serviceRequest.referral | undefined;
+
+        if (normalizedReferralCode) {
+            const referralRecord = await ReferralCode.findOne({
+                code: normalizedReferralCode,
+                isActive: true,
+            });
+
+            if (!referralRecord) {
+                res.status(400).json({
+                    success: false,
+                    message: "Referral code is invalid or inactive",
+                });
+                return;
+            }
+
+            const baseAmount = Number(serviceRequest.quotation?.amount ?? 0) || 0;
+            const calculated = calculateReferralDiscount({
+                code: referralRecord.code,
+                referrerName: referralRecord.referrerName,
+                discountAmount: referralRecord.discountAmount,
+                baseAmount,
+                currency: serviceRequest.quotation?.currency || currency || "INR",
+            });
+
+            referralPayload = {
+                code: calculated.code,
+                referrerName: calculated.referrerName,
+                discountAmount: calculated.discountAmount,
+                originalAmount: calculated.originalAmount,
+                finalAmount: calculated.finalAmount,
+                currency: calculated.currency,
+                appliedAt: new Date(),
+            };
+        }
+
+        const paymentAmount = referralPayload
+            ? referralPayload.finalAmount
+            : Number(amountPaid) || (serviceRequest.quotation?.amount || 0);
+
+        serviceRequest.referral = referralPayload;
         serviceRequest.paymentSubmission = {
             transactionId: transactionId.trim(),
-            amountPaid: Number(amountPaid) || (serviceRequest.quotation?.amount || 0),
+            amountPaid: paymentAmount,
             currency: currency || serviceRequest.quotation?.currency || "INR",
             payerName: payerName ? String(payerName).trim() : serviceRequest.customer.name,
             payerUpiId: payerUpiId ? String(payerUpiId).trim() : "",

@@ -194,12 +194,11 @@ export const Footer: React.FC<FooterProps> = ({ navigate }) => {
             {settings?.disclaimer ||
               "Research Hub provides ethical research consultation, technical writing guidance, proofreading, and journal formatting services. We strictly adhere to academic integrity standards and do not guarantee publication acceptance without editorial review."}
           </p>
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4 border-t border-slate-900/60 text-slate-500 text-[11px]">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4 border-t border-slate-900/60 text-slate-500 text-[11px] text-center sm:text-left">
             <p>© {new Date().getFullYear()} Research Hub Academic Network. All rights reserved.</p>
-            <div className="flex items-center gap-4">
-              <span className="text-slate-600">•</span>
+            <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-4">
               <span>Committee on Publication Ethics (COPE) Compliant</span>
-              <span className="text-slate-600">•</span>
+              <span className="text-slate-600 hidden sm:inline">•</span>
               <span>Zero-Plagiarism Guarantee</span>
             </div>
           </div>

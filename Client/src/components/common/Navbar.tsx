@@ -38,46 +38,46 @@ export const Navbar: React.FC<NavbarProps> = ({ currentRoute, navigate }) => {
   };
 
   return (
-    <header className="sticky top-0 z-40 w-full border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-xl">
+    <header className="sticky top-0 z-40 w-full border-b border-slate-800/80 bg-[#020c1a]/90 backdrop-blur-xl">
       <div className="w-full max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16">
-          {/* Logo */}
+        <div className="flex items-center justify-between h-[72px]">
+          {/* Logo (Responsive, single source of truth) */}
           <div
             onClick={() => handleNav("home")}
-            className="flex items-center gap-3 cursor-pointer group select-none"
+            className="flex items-center gap-2.5 sm:gap-3 min-w-0 cursor-pointer group select-none shrink-0"
           >
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-violet-500 flex items-center justify-center shadow-lg shadow-indigo-500/25 border border-indigo-400/30 group-hover:scale-105 transition-transform">
-              <GraduationCap className="w-5 h-5 text-white" />
+            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-violet-500 flex items-center justify-center shadow-lg shadow-indigo-500/25 border border-indigo-400/30 group-hover:scale-105 transition-transform shrink-0">
+              <GraduationCap className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
             </div>
-            <div>
-              <div className="flex items-center gap-1.5">
-                <span className="text-lg font-bold tracking-tight text-white group-hover:text-indigo-200 transition-colors">
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="text-[16px] sm:text-[19px] font-bold tracking-tight text-white group-hover:text-indigo-200 transition-colors whitespace-nowrap">
                   Research<span className="text-indigo-400 font-extrabold">Hub</span>
                 </span>
-                <span className="hidden sm:inline-block px-1.5 py-0.5 text-[10px] font-semibold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded">
+                <span className="inline-block px-1.5 py-0.5 text-[8px] sm:text-[9px] font-semibold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded shrink-0 tracking-[0.12em]">
                   ACADEMIC
                 </span>
               </div>
-              <p className="text-[11px] text-slate-400 font-medium hidden md:block">
+              <p className="text-[10px] text-slate-400 font-medium hidden md:block leading-none mt-0.5">
                 Advisory & Publication Platform
               </p>
             </div>
           </div>
 
           {/* Desktop Navigation */}
-          <nav className="hidden md:flex items-center gap-1">
+          <nav className="hidden md:flex items-center gap-2">
             {navItems.map((item) => {
               const active = currentRoute === item.id;
               return (
                 <button
                   key={item.id}
                   onClick={() => handleNav(item.id)}
-                  className={`px-3.5 py-2 rounded-lg text-sm font-medium transition-all duration-150 flex items-center gap-2 ${
+                  className={`px-3.5 py-2 rounded-xl text-[15px] font-medium transition-all duration-150 flex items-center gap-2 border ${
                     item.highlight
-                      ? "text-indigo-300 hover:text-white bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/20"
+                      ? "text-indigo-200 hover:text-white bg-indigo-500/10 hover:bg-indigo-500/20 border-indigo-500/25"
                       : active
-                      ? "text-white bg-slate-800/80"
-                      : "text-slate-300 hover:text-white hover:bg-slate-900"
+                      ? "text-white bg-slate-800/80 border-slate-700/70"
+                      : "text-slate-300 hover:text-white hover:bg-slate-900 border-slate-800/80"
                   }`}
                 >
                   <item.icon className="w-4 h-4 text-indigo-400" />
@@ -87,15 +87,15 @@ export const Navbar: React.FC<NavbarProps> = ({ currentRoute, navigate }) => {
             })}
           </nav>
 
-          {/* Right Actions */}
-          <div className="hidden md:flex items-center gap-3">
-            <WhatsAppButton size="sm" label="WhatsApp" />
+          {/* Desktop Right Actions */}
+          <div className="hidden md:flex items-center gap-2.5">
+            <WhatsAppButton size="sm" label="WhatsApp" className="!rounded-xl !shadow-lg !shadow-emerald-900/20 !h-[42px] !px-3.5" />
 
             {isAuthenticated ? (
-              <div className="flex items-center gap-2 pl-2 border-l border-slate-800">
+              <div className="flex items-center gap-2 pl-1.5 border-l border-slate-800">
                 <button
                   onClick={() => handleNav("customer-dashboard")}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                  className={`flex items-center gap-2 px-3 py-2 rounded-xl text-[15px] font-medium transition-colors ${
                     currentRoute === "customer-dashboard"
                       ? "bg-indigo-600 text-white"
                       : "bg-slate-800 hover:bg-slate-700 text-slate-200"
@@ -108,7 +108,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentRoute, navigate }) => {
                 {isStaff && (
                   <button
                     onClick={() => handleNav("admin-dashboard")}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
+                    className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-[15px] font-medium border transition-colors ${
                       currentRoute === "admin-dashboard"
                         ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
                         : "bg-amber-500/10 text-amber-400 border-amber-500/20 hover:bg-amber-500/20"
@@ -122,23 +122,23 @@ export const Navbar: React.FC<NavbarProps> = ({ currentRoute, navigate }) => {
                 <button
                   onClick={logout}
                   title="Sign Out"
-                  className="p-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
+                  className="p-2 rounded-xl text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
                 >
                   <LogOut className="w-4 h-4" />
                 </button>
               </div>
             ) : (
-              <div className="flex items-center gap-2 pl-2 border-l border-slate-800">
+              <div className="flex items-center gap-2 pl-1.5 border-l border-slate-800">
                 <button
                   onClick={() => handleNav("login")}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-[15px] font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
                 >
                   <LogIn className="w-4 h-4 text-slate-400" />
                   <span>Sign In</span>
                 </button>
                 <button
                   onClick={() => handleNav("register")}
-                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/20 transition-all hover:scale-[1.02] active:scale-[0.98]"
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[15px] font-medium bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/20 transition-all hover:scale-[1.02] active:scale-[0.98]"
                 >
                   <UserPlus className="w-4 h-4" />
                   <span>Register</span>
@@ -147,14 +147,19 @@ export const Navbar: React.FC<NavbarProps> = ({ currentRoute, navigate }) => {
             )}
           </div>
 
-          {/* Mobile Menu Toggle */}
-          <div className="flex md:hidden items-center gap-2">
-            <WhatsAppButton size="sm" label="" />
+          {/* Mobile Right Actions (WhatsApp + Hamburger) */}
+          <div className="flex md:hidden items-center gap-2 shrink-0">
+            <WhatsAppButton
+              size="sm"
+              label="WhatsApp"
+              className="!h-[36px] !rounded-xl !px-3 !text-[11px] !font-semibold !shadow-md shadow-emerald-900/20"
+            />
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 focus:outline-none"
+              className="p-2 rounded-xl text-slate-300 hover:text-white bg-slate-900/80 border border-slate-800 hover:bg-slate-800 focus:outline-none shrink-0 transition-colors"
+              aria-label="Toggle mobile navigation"
             >
-              {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+              {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
             </button>
           </div>
         </div>

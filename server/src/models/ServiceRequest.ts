@@ -57,6 +57,24 @@ export interface IServiceRequest extends Document {
         discipline?: string;
         university?: string;
         department?: string;
+        correspondingAuthor?: {
+            name?: string;
+            designation?: string;
+            email?: string;
+            orcidId?: string;
+        };
+        coAuthors?: Array<{
+            name?: string;
+            designation?: string;
+            email?: string;
+            orcidId?: string;
+        }>;
+        supervisor?: {
+            name?: string;
+            designation?: string;
+            email?: string;
+            orcidId?: string;
+        };
         publicationType?: string;
         targetJournal?: string;
         targetConference?: string;
@@ -118,6 +136,16 @@ export interface IServiceRequest extends Document {
         doiUrl?: string;
         notes?: string;
         uploadedAt?: Date;
+    };
+
+    referral?: {
+        code: string;
+        referrerName: string;
+        discountAmount: number;
+        originalAmount: number;
+        finalAmount: number;
+        currency: string;
+        appliedAt: Date;
     };
 
     assignedTo?: mongoose.Types.ObjectId;
@@ -199,6 +227,27 @@ const serviceRequestSchema = new Schema<IServiceRequest>(
             discipline: String,
             university: String,
             department: String,
+            correspondingAuthor: {
+                name: String,
+                designation: String,
+                email: String,
+                orcidId: String,
+            },
+            coAuthors: [
+                {
+                    _id: false,
+                    name: String,
+                    designation: String,
+                    email: String,
+                    orcidId: String,
+                },
+            ],
+            supervisor: {
+                name: String,
+                designation: String,
+                email: String,
+                orcidId: String,
+            },
             publicationType: String,
             targetJournal: String,
             targetConference: String,
@@ -305,6 +354,16 @@ const serviceRequestSchema = new Schema<IServiceRequest>(
             doiUrl: String,
             notes: String,
             uploadedAt: Date,
+        },
+
+        referral: {
+            code: { type: String, trim: true, uppercase: true },
+            referrerName: { type: String, trim: true },
+            discountAmount: Number,
+            originalAmount: Number,
+            finalAmount: Number,
+            currency: { type: String, default: "INR" },
+            appliedAt: Date,
         },
 
         assignedTo: {

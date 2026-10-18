@@ -38,7 +38,7 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ navigate }) => {
 
   return (
     <div className="w-full max-w-md mx-auto px-4 py-4 sm:py-6">
-      <div className="glass-panel p-8 sm:p-10 rounded-3xl border-slate-800 space-y-6 shadow-2xl shadow-indigo-950/40">
+      <div className="glass-panel p-5 sm:p-10 rounded-3xl border-slate-800 space-y-6 shadow-2xl shadow-indigo-950/40">
         <div className="text-center space-y-2">
           <div className="w-12 h-12 rounded-2xl bg-indigo-600 flex items-center justify-center mx-auto shadow-lg shadow-indigo-600/30">
             <GraduationCap className="w-6 h-6 text-white" />

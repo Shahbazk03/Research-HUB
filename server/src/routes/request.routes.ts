@@ -7,6 +7,7 @@ import {
     respondCustomerRequest,
     submitCustomerPayment,
 } from "../controllers/request.controller.js";
+import { validateReferralCode } from "../controllers/referral.controller.js";
 import { authenticate } from "../middleware/auth.middleware.js";
 
 const router = Router();
@@ -19,6 +20,7 @@ router.get("/", getCustomerServiceRequests);
 router.get("/:id", getServiceRequestById);
 router.patch("/:id/cancel", cancelCustomerRequest);
 router.patch("/:id/respond", respondCustomerRequest);
+router.post("/:id/validate-referral", validateReferralCode);
 router.post("/:id/payment", submitCustomerPayment);
 
 export default router;

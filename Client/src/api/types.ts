@@ -121,6 +121,24 @@ export interface ServiceRequest {
     discipline?: string;
     university?: string;
     department?: string;
+    correspondingAuthor?: {
+      name?: string;
+      designation?: string;
+      email?: string;
+      orcidId?: string;
+    };
+    coAuthors?: Array<{
+      name?: string;
+      designation?: string;
+      email?: string;
+      orcidId?: string;
+    }>;
+    supervisor?: {
+      name?: string;
+      designation?: string;
+      email?: string;
+      orcidId?: string;
+    };
     publicationType?: string;
     targetJournal?: string;
     targetConference?: string;
@@ -173,8 +191,28 @@ export interface ServiceRequest {
     notes?: string;
     uploadedAt?: string;
   };
+  referral?: {
+    code: string;
+    referrerName: string;
+    discountAmount: number;
+    originalAmount: number;
+    finalAmount: number;
+    currency: string;
+    appliedAt?: string;
+  };
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ReferralCode {
+  _id: string;
+  referrerName: string;
+  code: string;
+  discountAmount: number;
+  isActive: boolean;
+  notes?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface SiteSetting {

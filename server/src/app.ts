@@ -20,6 +20,9 @@ import uploadRoutes from "./routes/upload.routes.js";
 
 const app: Express = express();
 
+// Required when app runs behind Render/Vercel reverse proxy so X-Forwarded-* headers are trusted
+app.set("trust proxy", 1);
+
 /*
 |--------------------------------------------------------------------------
 | Security & Middlewares

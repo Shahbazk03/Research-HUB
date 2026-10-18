@@ -31,6 +31,7 @@ import {
   respondCustomerRequest,
   submitCustomerPayment,
   uploadAsset,
+  validateReferralCode,
 } from "../api";
 import { useAuth } from "../context/AuthContext";
 import { StatusBadge } from "../components/common/StatusBadge";
@@ -86,6 +87,22 @@ export const CustomerDashboardPage: React.FC<CustomerDashboardPageProps> = ({
   const [search, setSearch] = useState<string>("");
   const [selectedRequest, setSelectedRequest] = useState<ServiceRequest | null>(null);
 
+  const getRequestDisplayStatus = (request: ServiceRequest) => {
+    const hasSubmittedPayment = Boolean(
+      request.paymentSubmission?.transactionId?.trim() &&
+      Number(request.paymentSubmission?.amountPaid || 0) > 0
+    );
+
+    return request.paymentSubmission?.status === "PENDING_VERIFICATION" && hasSubmittedPayment
+      ? "UNDER_REVIEW"
+      : request.status;
+  };
+
+  const hasValidSubmittedPayment = Boolean(
+    selectedRequest?.paymentSubmission?.transactionId?.trim() &&
+    Number(selectedRequest.paymentSubmission?.amountPaid || 0) > 0
+  );
+
   // Response modal state
   const [responseMessage, setResponseMessage] = useState<string>("");
   const [isResponding, setIsResponding] = useState<boolean>(false);
@@ -98,6 +115,9 @@ export const CustomerDashboardPage: React.FC<CustomerDashboardPageProps> = ({
   const [paymentPayerUpi, setPaymentPayerUpi] = useState<string>("");
   const [paymentScreenshotUrl, setPaymentScreenshotUrl] = useState<string>("");
   const [paymentNotes, setPaymentNotes] = useState<string>("");
+  const [referralCode, setReferralCode] = useState<string>("");
+  const [referralPreview, setReferralPreview] = useState<{ code: string; referrerName: string; discountAmount: number; finalAmount: number; originalAmount: number } | null>(null);
+  const [referralValidationError, setReferralValidationError] = useState<string>("");
   const [isUploadingScreenshot, setIsUploadingScreenshot] = useState<boolean>(false);
   const [isEditingPayment, setIsEditingPayment] = useState<boolean>(false);
   const [paymentFeedback, setPaymentFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
@@ -118,9 +138,22 @@ export const CustomerDashboardPage: React.FC<CustomerDashboardPageProps> = ({
     if (selectedRequest) {
       setPaymentTxnId(selectedRequest.paymentSubmission?.transactionId || "");
       setPaymentAmount(
+        selectedRequest.referral?.finalAmount ??
         selectedRequest.paymentSubmission?.amountPaid ??
         selectedRequest.quotation?.amount ??
         ""
+      );
+      setReferralCode(selectedRequest.referral?.code || "");
+      setReferralPreview(
+        selectedRequest.referral
+          ? {
+              code: selectedRequest.referral.code,
+              referrerName: selectedRequest.referral.referrerName,
+              discountAmount: selectedRequest.referral.discountAmount,
+              finalAmount: selectedRequest.referral.finalAmount,
+              originalAmount: selectedRequest.referral.originalAmount,
+            }
+          : null
       );
       setPaymentPayerName(
         selectedRequest.paymentSubmission?.payerName ||
@@ -138,6 +171,44 @@ export const CustomerDashboardPage: React.FC<CustomerDashboardPageProps> = ({
     navigator.clipboard.writeText(upiId);
     setCopiedUpi(true);
     setTimeout(() => setCopiedUpi(false), 2000);
+  };
+
+  const handleApplyReferral = async () => {
+    if (!selectedRequest || !selectedRequest.quotation?.amount) {
+      setReferralValidationError("A quotation amount must exist before applying a referral code.");
+      return;
+    }
+
+    const trimmedCode = referralCode.trim();
+    if (!trimmedCode) {
+      setReferralValidationError("Enter a referral code to apply a discount.");
+      return;
+    }
+
+    try {
+      setReferralValidationError("");
+      const validated = await validateReferralCode(selectedRequest._id, {
+        code: trimmedCode,
+        amount: Number(selectedRequest.quotation.amount),
+      });
+
+      setReferralPreview({
+        code: validated.code,
+        referrerName: validated.referrerName,
+        discountAmount: validated.discountAmount,
+        finalAmount: validated.finalAmount,
+        originalAmount: validated.originalAmount,
+      });
+      setPaymentAmount(validated.finalAmount);
+      setReferralCode(validated.code);
+      setPaymentFeedback({
+        type: "success",
+        text: `Referral applied successfully: ${validated.referrerName} discount of ${formatCurrencyAmount(validated.discountAmount, selectedRequest.quotation.currency || "INR")} added.`,
+      });
+    } catch (error: any) {
+      setReferralPreview(null);
+      setReferralValidationError(error?.response?.data?.message || "Referral code is invalid.");
+    }
   };
 
   const handleScreenshotUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -267,7 +338,7 @@ export const CustomerDashboardPage: React.FC<CustomerDashboardPageProps> = ({
   };
 
   return (
-    <div className="w-full max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 pt-4 sm:pt-6 pb-12 space-y-6">
+    <div className="w-full max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 pt-4 sm:pt-6 pb-12 space-y-6 min-w-0">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-6">
         <div>
@@ -357,7 +428,7 @@ export const CustomerDashboardPage: React.FC<CustomerDashboardPageProps> = ({
             </div>
 
             <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
-              {["all", "NEW", "IN_PROGRESS", "WAITING_FOR_CUSTOMER", "COMPLETED"].map((st) => (
+              {["all", "NEW", "UNDER_REVIEW", "IN_PROGRESS", "WAITING_FOR_CUSTOMER", "COMPLETED"].map((st) => (
                 <button
                   key={st}
                   onClick={() => setStatusFilter(st)}
@@ -410,7 +481,7 @@ export const CustomerDashboardPage: React.FC<CustomerDashboardPageProps> = ({
                         <span className="font-mono text-xs font-bold text-indigo-300">
                           {req.requestNumber}
                         </span>
-                        <StatusBadge status={req.status} size="sm" />
+                        <StatusBadge status={getRequestDisplayStatus(req)} size="sm" />
                         <span className="text-[11px] text-slate-500">
                           {new Date(req.createdAt).toLocaleDateString()}
                         </span>
@@ -609,8 +680,8 @@ export const CustomerDashboardPage: React.FC<CustomerDashboardPageProps> = ({
       {/* REQUEST DETAIL MODAL                                                      */}
       {/* ========================================================================= */}
       {selectedRequest && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
-          <div className="glass-panel w-full max-w-2xl rounded-3xl border-slate-700 p-6 sm:p-8 space-y-6 max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-start justify-center p-4 overflow-y-auto">
+          <div className="glass-panel w-full max-w-2xl rounded-3xl border-slate-700 p-5 sm:p-8 space-y-6 my-4">
             {/* Header */}
             <div className="flex items-center justify-between border-b border-slate-800 pb-4">
               <div>
@@ -618,7 +689,7 @@ export const CustomerDashboardPage: React.FC<CustomerDashboardPageProps> = ({
                   <span className="font-mono text-sm font-bold text-indigo-300">
                     {selectedRequest.requestNumber}
                   </span>
-                  <StatusBadge status={selectedRequest.status} size="sm" />
+                  <StatusBadge status={getRequestDisplayStatus(selectedRequest)} size="sm" />
                 </div>
                 <h3 className="text-base font-bold text-white mt-1">
                   {typeof selectedRequest.serviceId === "object"
@@ -715,6 +786,21 @@ export const CustomerDashboardPage: React.FC<CustomerDashboardPageProps> = ({
                   </p>
                 )}
 
+                {referralPreview && (
+                  <div className="p-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-xs text-emerald-200">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-semibold">Referral Discount Applied</span>
+                      <span className="font-mono text-emerald-300">{referralPreview.code}</span>
+                    </div>
+                    <p className="mt-1 text-[11px] text-emerald-100/80">
+                      {referralPreview.referrerName} has provided a discount of {formatCurrencyAmount(referralPreview.discountAmount, selectedRequest.quotation?.currency || "INR")}.
+                    </p>
+                    <p className="mt-1 text-[11px] text-emerald-100/80">
+                      Original: {formatCurrencyAmount(referralPreview.originalAmount, selectedRequest.quotation?.currency || "INR")} → Final payable: {formatCurrencyAmount(referralPreview.finalAmount, selectedRequest.quotation?.currency || "INR")}
+                    </p>
+                  </div>
+                )}
+
                 {/* QR Code Presentation */}
                 {selectedRequest.paymentQr?.url && (
                   <div className="p-4 rounded-xl bg-slate-950/80 border border-indigo-500/20 flex flex-col sm:flex-row items-center gap-4">
@@ -782,7 +868,7 @@ export const CustomerDashboardPage: React.FC<CustomerDashboardPageProps> = ({
                     <span>Verified</span>
                   </span>
                 )}
-                {selectedRequest.paymentSubmission?.status === "PENDING_VERIFICATION" && (
+                {selectedRequest.paymentSubmission?.status === "PENDING_VERIFICATION" && hasValidSubmittedPayment && (
                   <span className="text-[11px] font-bold text-amber-300 bg-amber-500/20 border border-amber-500/40 px-2.5 py-0.5 rounded-lg flex items-center gap-1">
                     <Clock className="w-3.5 h-3.5" />
                     <span>Under Review</span>
@@ -854,7 +940,7 @@ export const CustomerDashboardPage: React.FC<CustomerDashboardPageProps> = ({
                     </div>
                   )}
                 </div>
-              ) : selectedRequest.paymentSubmission && !isEditingPayment ? (
+              ) : selectedRequest.paymentSubmission && hasValidSubmittedPayment && !isEditingPayment ? (
                 /* Case B: Payment Submitted (Pending Verification or Rejected) */
                 <div className="space-y-3">
                   <div
@@ -955,6 +1041,7 @@ export const CustomerDashboardPage: React.FC<CustomerDashboardPageProps> = ({
                         payerUpiId: paymentPayerUpi.trim() || undefined,
                         screenshotUrl: paymentScreenshotUrl || undefined,
                         notes: paymentNotes.trim() || undefined,
+                        referralCode: referralCode.trim() || undefined,
                       },
                     });
                   }}
@@ -1009,6 +1096,39 @@ export const CustomerDashboardPage: React.FC<CustomerDashboardPageProps> = ({
                         className="w-full p-2.5 rounded-xl glass-input text-xs font-mono text-white border-indigo-500/40 focus:border-indigo-500"
                       />
                     </div>
+                  </div>
+
+                  <div className="p-3.5 rounded-xl border border-violet-500/30 bg-violet-500/5 space-y-2">
+                    <label className="block text-[11px] font-semibold text-slate-300">
+                      Referral Code (Optional)
+                    </label>
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <input
+                        type="text"
+                        placeholder="e.g. SHAHBAZ01"
+                        value={referralCode}
+                        onChange={(e) => {
+                          setReferralCode(e.target.value.toUpperCase());
+                          setReferralValidationError("");
+                        }}
+                        className="w-full p-2.5 rounded-xl glass-input text-xs text-white uppercase"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleApplyReferral}
+                        className="px-3.5 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-[11px] font-semibold whitespace-nowrap"
+                      >
+                        Apply Discount
+                      </button>
+                    </div>
+                    {referralValidationError && (
+                      <p className="text-[11px] text-rose-300">{referralValidationError}</p>
+                    )}
+                    {referralPreview && (
+                      <p className="text-[11px] text-emerald-300">
+                        {referralPreview.referrerName} discount is active: {formatCurrencyAmount(referralPreview.discountAmount, selectedRequest.quotation?.currency || "INR")} off.
+                      </p>
+                    )}
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">

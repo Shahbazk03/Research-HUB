@@ -60,7 +60,7 @@ export const HomePage: React.FC<HomePageProps> = ({ navigate }) => {
           {/* Badge */}
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 text-xs font-semibold tracking-wide backdrop-blur-md">
             <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-            <span>Ethical Academic Advisory & Manuscript Preparation</span>
+            <span>Ethical Academic Advisory &amp; Manuscript Preparation</span>
           </div>
 
           {/* Main Headline */}
@@ -106,7 +106,7 @@ export const HomePage: React.FC<HomePageProps> = ({ navigate }) => {
                 onClick={() => navigate("services", { search: "Deep Learning" })}
                 className="hover:text-indigo-300 underline underline-offset-4 decoration-slate-700"
               >
-                AI & Deep Learning
+                AI &amp; Deep Learning
               </button>
               <span>•</span>
               <button
@@ -127,7 +127,7 @@ export const HomePage: React.FC<HomePageProps> = ({ navigate }) => {
                 onClick={() => navigate("services", { search: "Editing" })}
                 className="hover:text-indigo-300 underline underline-offset-4 decoration-slate-700"
               >
-                Turnitin & Editing
+                Turnitin &amp; Editing
               </button>
             </div>
           </div>

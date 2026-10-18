@@ -66,6 +66,12 @@ import {
     getAdminReferenceData,
     updateAdminReferenceData,
 } from "../controllers/adminReferenceData.controller.js";
+import {
+    getAdminReferralCodes,
+    createAdminReferralCode,
+    updateAdminReferralCode,
+    deleteAdminReferralCode,
+} from "../controllers/adminReferral.controller.js";
 
 const router = Router();
 
@@ -156,5 +162,13 @@ router.delete("/cms/faqs/:id", requireAdmin, deleteAdminFaq);
 /* -------------------------------------------------------------------------- */
 router.get("/reference-data", getAdminReferenceData);
 router.put("/reference-data/:key", requireAdmin, updateAdminReferenceData);
+
+/* -------------------------------------------------------------------------- */
+/* Referral Codes Management                                                  */
+/* -------------------------------------------------------------------------- */
+router.get("/referrals", getAdminReferralCodes);
+router.post("/referrals", requireAdmin, createAdminReferralCode);
+router.put("/referrals/:id", requireAdmin, updateAdminReferralCode);
+router.delete("/referrals/:id", requireAdmin, deleteAdminReferralCode);
 
 export default router;

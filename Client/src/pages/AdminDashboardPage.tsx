@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   LayoutDashboard,
   FileText,
@@ -22,6 +22,7 @@ import {
   TrendingUp,
   RefreshCw,
   Key,
+  Gift,
   Lock,
   BookOpen,
   GraduationCap,
@@ -66,10 +67,14 @@ import {
   updateAdminFaq,
   deleteAdminFaq,
   uploadAsset,
+  getAdminReferralCodes,
+  createAdminReferralCode,
+  updateAdminReferralCode,
+  deleteAdminReferralCode,
 } from "../api";
 import { useAuth } from "../context/AuthContext";
 import { StatusBadge } from "../components/common/StatusBadge";
-import { Service, ServiceRequest, User as UserType, formatServicePrice, formatCurrencyAmount } from "../api/types";
+import { Service, ServiceRequest, User as UserType, ReferralCode, formatServicePrice, formatCurrencyAmount } from "../api/types";
 
 interface AdminDashboardPageProps {
   navigate: (route: string, params?: any) => void;
@@ -83,6 +88,7 @@ const VALID_ADMIN_TABS = [
   "domains",
   "categories",
   "users",
+  "referrals",
   "settings",
   "faqs",
 ] as const;
@@ -146,6 +152,57 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ navigate
     enabled: isStaff,
   });
 
+  const { data: adminReferralCodes = [], isLoading: referralsLoading } = useQuery({
+    queryKey: ["admin-referrals"],
+    queryFn: getAdminReferralCodes,
+    enabled: isStaff && activeSection === "referrals",
+  });
+
+  const [referralForm, setReferralForm] = useState({
+    referrerName: "",
+    code: "",
+    discountAmount: "",
+    notes: "",
+    isActive: true,
+  });
+  const [editingReferralId, setEditingReferralId] = useState<string | null>(null);
+
+  const liveActivity = useMemo(() => {
+    const signupTrend = overview?.activity?.signupTrend || [];
+    const requestTrend = overview?.activity?.requestTrend || [];
+    const peakSignupCount = Math.max(...signupTrend.map((item: any) => Number(item.value || 0)), 1);
+    const peakRequestCount = Math.max(...requestTrend.map((item: any) => Number(item.value || 0)), 1);
+
+    const signupPoints = signupTrend
+      .map((point: any, index: number) => {
+        const x = 18 + index * 35;
+        const y = 110 - (Number(point.value || 0) / peakSignupCount) * 70;
+        return `${x},${y}`;
+      })
+      .join(" ");
+
+    const requestPoints = requestTrend
+      .map((point: any, index: number) => {
+        const x = 18 + index * 35;
+        const y = 110 - (Number(point.value || 0) / peakRequestCount) * 70;
+        return `${x},${y}`;
+      })
+      .join(" ");
+
+    return {
+      todayUsers: overview?.activity?.todayUsers || 0,
+      todayRequests: overview?.activity?.todayRequests || 0,
+      signupsLast7Days: overview?.activity?.signupsLast7Days || 0,
+      requestsLast7Days: overview?.activity?.requestsLast7Days || 0,
+      signupTrend,
+      requestTrend,
+      peakSignupCount,
+      peakRequestCount,
+      signupPoints,
+      requestPoints,
+    };
+  }, [overview]);
+
   // -------------------------------------------------------------------------
   // 2. REQUESTS TAB STATE & QUERIES
   // -------------------------------------------------------------------------
@@ -153,6 +210,17 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ navigate
   const [requestSearch, setRequestSearch] = useState("");
   const [selectedReqForModal, setSelectedReqForModal] = useState<ServiceRequest | null>(null);
   const [newStatus, setNewStatus] = useState("");
+
+  const getRequestDisplayStatus = (request: ServiceRequest) => {
+    const hasSubmittedPayment = Boolean(
+      request.paymentSubmission?.transactionId?.trim() &&
+      Number(request.paymentSubmission?.amountPaid || 0) > 0
+    );
+
+    return request.paymentSubmission?.status === "PENDING_VERIFICATION" && hasSubmittedPayment
+      ? "UNDER_REVIEW"
+      : request.status;
+  };
   const [adminNotesText, setAdminNotesText] = useState("");
   const [quotationAmount, setQuotationAmount] = useState<number | string>("");
   const [quotationCurrency, setQuotationCurrency] = useState("INR");
@@ -264,6 +332,36 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ navigate
       queryClient.invalidateQueries({ queryKey: ["admin-overview"] });
       setSelectedReqForModal(null);
       showFeedback("success", "Request deleted successfully.");
+    },
+  });
+
+  const saveReferralMutation = useMutation({
+    mutationFn: (payload: any) =>
+      editingReferralId
+        ? updateAdminReferralCode(editingReferralId, payload)
+        : createAdminReferralCode(payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin-referrals"] });
+      setEditingReferralId(null);
+      setReferralForm({
+        referrerName: "",
+        code: "",
+        discountAmount: "",
+        notes: "",
+        isActive: true,
+      });
+      showFeedback("success", "Referral code saved successfully.");
+    },
+    onError: (err: any) => {
+      showFeedback("error", err.response?.data?.message || "Failed to save referral code.");
+    },
+  });
+
+  const deleteReferralMutation = useMutation({
+    mutationFn: (id: string) => deleteAdminReferralCode(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin-referrals"] });
+      showFeedback("success", "Referral code removed.");
     },
   });
 
@@ -623,24 +721,25 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ navigate
 
       {/* Main Grid: Sidebar + Active Section */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 items-start">
-        {/* Sidebar Nav */}
-        <nav className="glass-panel p-3 rounded-2xl border-slate-800 space-y-1">
+        {/* Sidebar Nav — horizontal scrollable on mobile, vertical on lg+ */}
+        <nav className="glass-panel p-2 lg:p-3 rounded-2xl border-slate-800 flex lg:flex-col lg:space-y-1 overflow-x-auto lg:overflow-x-visible gap-1 lg:gap-0 pb-2 lg:pb-3">
           {[
-            { id: "overview", label: "Executive Dashboard", icon: LayoutDashboard },
-            { id: "requests", label: "Service Requests", icon: FileText },
-            { id: "services", label: "Services & Pricing", icon: Layers },
-            { id: "domains", label: "Disciplines (Domains)", icon: Building2 },
-            { id: "categories", label: "Service Categories", icon: Tag },
-            { id: "users", label: "User Accounts", icon: Users },
-            { id: "settings", label: "Settings & WhatsApp", icon: Settings },
-            { id: "faqs", label: "CMS FAQs", icon: HelpCircle },
+            { id: "overview", label: "Dashboard", icon: LayoutDashboard },
+            { id: "requests", label: "Requests", icon: FileText },
+            { id: "services", label: "Services", icon: Layers },
+            { id: "domains", label: "Domains", icon: Building2 },
+            { id: "categories", label: "Categories", icon: Tag },
+            { id: "users", label: "Users", icon: Users },
+            { id: "referrals", label: "Referrals", icon: Gift },
+            { id: "settings", label: "Settings", icon: Settings },
+            { id: "faqs", label: "FAQs", icon: HelpCircle },
           ].map((item) => {
             const active = activeSection === item.id;
             return (
               <button
                 key={item.id}
                 onClick={() => handleSectionChange(item.id as any)}
-                className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${
+                className={`shrink-0 lg:w-full flex items-center gap-2 lg:gap-3 px-3 lg:px-3.5 py-2 lg:py-2.5 rounded-xl text-xs font-semibold transition-all whitespace-nowrap ${
                   active
                     ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
                     : "text-slate-400 hover:text-white hover:bg-slate-900"
@@ -654,7 +753,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ navigate
         </nav>
 
         {/* Section View */}
-        <main className="lg:col-span-4 space-y-6">
+        <main className="lg:col-span-4 space-y-6 min-w-0">
           {/* =================================================================== */}
           {/* 1. OVERVIEW SECTION                                                 */}
           {/* =================================================================== */}
@@ -709,6 +808,134 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ navigate
                 </div>
               </div>
 
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <span className="inline-flex h-2.5 w-2.5 rounded-full bg-emerald-400 animate-pulse" />
+                    <h3 className="text-sm font-bold uppercase tracking-[0.18em] text-slate-300">LIVE DATA VIEW</h3>
+                  </div>
+                  <span className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Real-time metrics</span>
+                </div>
+
+                <div className="glass-panel p-5 rounded-2xl border-slate-800 overflow-hidden">
+                  <div className="grid grid-cols-1 lg:grid-cols-[1.1fr_1.6fr] gap-4">
+                    <div className="space-y-4">
+                      <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-4">
+                        <div className="flex items-center justify-between text-slate-400 text-[11px]">
+                          <span>Users today</span>
+                          <Users className="w-3.5 h-3.5 text-sky-400" />
+                        </div>
+                        <p className="mt-2 text-4xl font-black text-white">{liveActivity.todayUsers}</p>
+                        <p className="mt-1 text-[11px] text-slate-400">Signups from the last 24 hours</p>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-3">
+                          <p className="text-[10px] uppercase tracking-[0.18em] text-slate-400">Requests today</p>
+                          <p className="mt-2 text-2xl font-black text-sky-300">{liveActivity.todayRequests}</p>
+                          <p className="mt-1 text-[10px] text-slate-500">New submissions</p>
+                        </div>
+                        <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-3">
+                          <p className="text-[10px] uppercase tracking-[0.18em] text-slate-400">7-day total</p>
+                          <p className="mt-2 text-2xl font-black text-violet-300">{liveActivity.signupsLast7Days}</p>
+                          <p className="mt-1 text-[10px] text-slate-500">User signups</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                      <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-4">
+                        <div className="flex items-center justify-between mb-4">
+                          <div>
+                            <p className="text-[10px] uppercase tracking-[0.18em] text-slate-400">User trend</p>
+                            <p className="text-base font-bold text-white">Last 7 days</p>
+                          </div>
+                          <div className="rounded-full bg-sky-500/10 px-2 py-1 text-[10px] font-semibold text-sky-300">
+                            {liveActivity.signupsLast7Days} total
+                          </div>
+                        </div>
+
+                        <svg viewBox="0 0 260 120" className="w-full h-28" preserveAspectRatio="none" role="img" aria-label="User signup graph">
+                          <defs>
+                            <linearGradient id="userTrendFill" x1="0" x2="0" y1="0" y2="1">
+                              <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.5" />
+                              <stop offset="100%" stopColor="#38bdf8" stopOpacity="0.05" />
+                            </linearGradient>
+                          </defs>
+                          <path d={`M 18,110 ${liveActivity.signupPoints} 242,110`} fill="url(#userTrendFill)" opacity="0.9" />
+                          <polyline
+                            points={liveActivity.signupPoints}
+                            fill="none"
+                            stroke="#38bdf8"
+                            strokeWidth="3"
+                            strokeLinejoin="round"
+                            strokeLinecap="round"
+                          />
+                          {liveActivity.signupTrend.map((point: any, index: number) => {
+                            const x = 18 + index * 35;
+                            const y = 110 - (Number(point.value || 0) / Math.max(1, liveActivity.peakSignupCount)) * 70;
+                            return <circle key={point.label} cx={x} cy={y} r="3.5" fill="#bae6fd" />;
+                          })}
+                        </svg>
+
+                        <div className="mt-3 grid grid-cols-7 gap-2 text-center">
+                          {liveActivity.signupTrend.map((point: any) => (
+                            <div key={point.label} className="text-[10px] text-slate-400">
+                              <div className="font-semibold text-slate-300">{point.value}</div>
+                              <div>{point.label}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-4">
+                        <div className="flex items-center justify-between mb-4">
+                          <div>
+                            <p className="text-[10px] uppercase tracking-[0.18em] text-slate-400">Requests trend</p>
+                            <p className="text-base font-bold text-white">Last 7 days</p>
+                          </div>
+                          <div className="rounded-full bg-violet-500/10 px-2 py-1 text-[10px] font-semibold text-violet-300">
+                            {liveActivity.requestsLast7Days} total
+                          </div>
+                        </div>
+
+                        <svg viewBox="0 0 260 120" className="w-full h-28" preserveAspectRatio="none" role="img" aria-label="Request trend graph">
+                          <defs>
+                            <linearGradient id="requestTrendFill" x1="0" x2="0" y1="0" y2="1">
+                              <stop offset="0%" stopColor="#a78bfa" stopOpacity="0.5" />
+                              <stop offset="100%" stopColor="#a78bfa" stopOpacity="0.05" />
+                            </linearGradient>
+                          </defs>
+                          <path d={`M 18,110 ${liveActivity.requestPoints} 242,110`} fill="url(#requestTrendFill)" opacity="0.9" />
+                          <polyline
+                            points={liveActivity.requestPoints}
+                            fill="none"
+                            stroke="#a78bfa"
+                            strokeWidth="3"
+                            strokeLinejoin="round"
+                            strokeLinecap="round"
+                          />
+                          {liveActivity.requestTrend.map((point: any, index: number) => {
+                            const x = 18 + index * 35;
+                            const y = 110 - (Number(point.value || 0) / Math.max(1, liveActivity.peakRequestCount)) * 70;
+                            return <circle key={point.label} cx={x} cy={y} r="3.5" fill="#ddd6fe" />;
+                          })}
+                        </svg>
+
+                        <div className="mt-3 grid grid-cols-7 gap-2 text-center">
+                          {liveActivity.requestTrend.map((point: any) => (
+                            <div key={point.label} className="text-[10px] text-slate-400">
+                              <div className="font-semibold text-slate-300">{point.value}</div>
+                              <div>{point.label}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               {/* Recent Requests Table */}
               <div className="glass-panel p-6 rounded-2xl border-slate-800 space-y-4">
                 <div className="flex items-center justify-between">
@@ -721,8 +948,8 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ navigate
                   </button>
                 </div>
 
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
+                <div className="overflow-x-auto -mx-2 px-2">
+                  <table className="w-full min-w-[480px] text-left text-xs">
                     <thead className="text-slate-400 border-b border-slate-800">
                       <tr>
                         <th className="pb-3 font-semibold">Request #</th>
@@ -748,7 +975,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ navigate
                             {req.serviceId?.name || "Academic Service"}
                           </td>
                           <td className="py-3">
-                            <StatusBadge status={req.status} size="sm" />
+                            <StatusBadge status={getRequestDisplayStatus(req)} size="sm" />
                           </td>
                           <td className="py-3 text-right text-slate-400">
                             {new Date(req.createdAt).toLocaleDateString()}
@@ -801,7 +1028,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ navigate
               {/* Table */}
               <div className="glass-panel rounded-2xl border-slate-800 overflow-hidden">
                 <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
+                  <table className="w-full min-w-[640px] text-left text-xs">
                     <thead className="bg-slate-900 text-slate-400 border-b border-slate-800">
                       <tr>
                         <th className="p-3.5 font-semibold">Reference #</th>
@@ -888,7 +1115,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ navigate
                               )}
                             </td>
                             <td className="p-3.5">
-                              <StatusBadge status={req.status} size="sm" />
+                              <StatusBadge status={getRequestDisplayStatus(req)} size="sm" />
                             </td>
                             <td className="p-3.5">
                               {customerWa ? (
@@ -1209,7 +1436,8 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ navigate
               </div>
 
               <div className="glass-panel rounded-2xl border-slate-800 overflow-hidden">
-                <table className="w-full text-left text-xs">
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[560px] text-left text-xs">
                   <thead className="bg-slate-900 text-slate-400 border-b border-slate-800">
                     <tr>
                       <th className="p-3.5 font-semibold">Name & Email</th>
@@ -1305,12 +1533,203 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ navigate
                     )}
                   </tbody>
                 </table>
+                </div>
               </div>
             </div>
           )}
 
           {/* =================================================================== */}
-          {/* 7. SETTINGS & WHATSAPP TAB                                          */}
+          {/* 7. REFERRALS TAB                                                     */}
+          {/* =================================================================== */}
+          {activeSection === "referrals" && (
+            <div className="space-y-6 animate-fade-in">
+              <div className="border-b border-slate-800 pb-3">
+                <h3 className="text-base font-bold text-white flex items-center gap-2">
+                  <Gift className="w-4 h-4 text-violet-400" />
+                  <span>Referral Program</span>
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Create discount codes for customers and track active referral offers tied to quotation payment.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="glass-panel p-5 rounded-2xl border-slate-800">
+                  <p className="text-xs text-slate-400">Active Codes</p>
+                  <p className="text-3xl font-black text-white mt-1">
+                    {adminReferralCodes.filter((code) => code.isActive).length}
+                  </p>
+                </div>
+                <div className="glass-panel p-5 rounded-2xl border-slate-800">
+                  <p className="text-xs text-sky-400">Total Codes</p>
+                  <p className="text-3xl font-black text-sky-300 mt-1">{adminReferralCodes.length}</p>
+                </div>
+                <div className="glass-panel p-5 rounded-2xl border-slate-800">
+                  <p className="text-xs text-emerald-400">Discount Pool</p>
+                  <p className="text-xl font-black text-emerald-300 mt-1">
+                    ₹{adminReferralCodes.reduce((sum, item) => sum + Number(item.discountAmount || 0), 0).toLocaleString("en-IN")}
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 xl:grid-cols-[1.2fr_2fr] gap-6">
+                <div className="glass-panel p-5 rounded-2xl border-slate-800 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-sm font-bold text-white">
+                      {editingReferralId ? "Edit Referral Code" : "Create Referral Code"}
+                    </h4>
+                    {editingReferralId && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingReferralId(null);
+                          setReferralForm({ referrerName: "", code: "", discountAmount: "", notes: "", isActive: true });
+                        }}
+                        className="text-[11px] text-slate-300 hover:text-white"
+                      >
+                        Cancel
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-300 mb-1">Referrer Name</label>
+                      <input
+                        type="text"
+                        value={referralForm.referrerName}
+                        onChange={(e) => setReferralForm((prev) => ({ ...prev, referrerName: e.target.value }))}
+                        className="w-full p-2.5 rounded-xl glass-input text-xs text-white"
+                        placeholder="e.g. Shahbaz"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-300 mb-1">Referral Code</label>
+                      <input
+                        type="text"
+                        value={referralForm.code}
+                        onChange={(e) => setReferralForm((prev) => ({ ...prev, code: e.target.value.toUpperCase() }))}
+                        className="w-full p-2.5 rounded-xl glass-input text-xs text-white uppercase"
+                        placeholder="e.g. SHAHBAZ01"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-300 mb-1">Discount Amount (₹)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={referralForm.discountAmount}
+                        onChange={(e) => setReferralForm((prev) => ({ ...prev, discountAmount: e.target.value }))}
+                        className="w-full p-2.5 rounded-xl glass-input text-xs text-white"
+                        placeholder="e.g. 500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-300 mb-1">Notes</label>
+                      <textarea
+                        rows={3}
+                        value={referralForm.notes}
+                        onChange={(e) => setReferralForm((prev) => ({ ...prev, notes: e.target.value }))}
+                        className="w-full p-2.5 rounded-xl glass-input text-xs text-white"
+                        placeholder="Optional campaign notes"
+                      />
+                    </div>
+
+                    <label className="flex items-center gap-2 text-xs text-slate-300">
+                      <input
+                        type="checkbox"
+                        checked={referralForm.isActive}
+                        onChange={(e) => setReferralForm((prev) => ({ ...prev, isActive: e.target.checked }))}
+                        className="rounded border-slate-700 bg-slate-900"
+                      />
+                      Code is active
+                    </label>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        saveReferralMutation.mutate({
+                          referrerName: referralForm.referrerName,
+                          code: referralForm.code,
+                          discountAmount: Number(referralForm.discountAmount) || 0,
+                          notes: referralForm.notes,
+                          isActive: referralForm.isActive,
+                        });
+                      }}
+                      disabled={saveReferralMutation.isPending}
+                      className="w-full px-4 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-semibold disabled:opacity-60"
+                    >
+                      {saveReferralMutation.isPending ? "Saving..." : editingReferralId ? "Update Referral" : "Create Referral"}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="glass-panel p-5 rounded-2xl border-slate-800 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-sm font-bold text-white">Referral Code Library</h4>
+                    {referralsLoading && <span className="text-[11px] text-slate-400">Loading...</span>}
+                  </div>
+
+                  <div className="space-y-3">
+                    {adminReferralCodes.length === 0 ? (
+                      <div className="p-4 rounded-xl border border-dashed border-slate-700 text-xs text-slate-400">
+                        No referral codes created yet.
+                      </div>
+                    ) : (
+                      adminReferralCodes.map((item: ReferralCode) => (
+                        <div key={item._id} className="rounded-2xl border border-slate-800 bg-slate-950/60 p-3.5">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-bold text-violet-300">{item.code}</span>
+                                <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-semibold ${item.isActive ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30" : "bg-slate-700 text-slate-300 border border-slate-600"}`}>
+                                  {item.isActive ? "Active" : "Inactive"}
+                                </span>
+                              </div>
+                              <p className="text-xs text-slate-300 mt-1">Referrer: {item.referrerName}</p>
+                              <p className="text-[11px] text-slate-400 mt-1">Discount: ₹{Number(item.discountAmount || 0).toLocaleString("en-IN")}</p>
+                              {item.notes && <p className="text-[11px] text-slate-400 mt-1">{item.notes}</p>}
+                            </div>
+                            <div className="flex flex-col gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingReferralId(item._id);
+                                  setReferralForm({
+                                    referrerName: item.referrerName,
+                                    code: item.code,
+                                    discountAmount: String(item.discountAmount ?? ""),
+                                    notes: item.notes || "",
+                                    isActive: Boolean(item.isActive),
+                                  });
+                                }}
+                                className="px-2 py-1 rounded-lg bg-slate-800 text-[10px] font-semibold text-slate-200 hover:bg-slate-700"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => deleteReferralMutation.mutate(item._id)}
+                                className="px-2 py-1 rounded-lg bg-rose-500/10 text-[10px] font-semibold text-rose-300 border border-rose-500/20 hover:bg-rose-500/20"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* =================================================================== */}
+          {/* 8. SETTINGS & WHATSAPP TAB                                          */}
           {/* =================================================================== */}
           {activeSection === "settings" && (
             <div className="glass-panel p-6 sm:p-8 rounded-3xl border-slate-800 space-y-6 animate-fade-in">
@@ -1536,7 +1955,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ navigate
                   <span className="font-mono text-sm font-bold text-indigo-300">
                     {selectedReqForModal.requestNumber}
                   </span>
-                  <StatusBadge status={selectedReqForModal.status} size="sm" />
+                  <StatusBadge status={getRequestDisplayStatus(selectedReqForModal)} size="sm" />
                 </div>
                 <h3 className="text-base font-bold text-white mt-1">
                   {typeof selectedReqForModal.serviceId === "object"
@@ -1627,6 +2046,24 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ navigate
                   <div>
                     <span className="text-slate-500 text-[10px] block">University / Institution:</span>
                     <strong className="text-white block">{selectedReqForModal.academicProfile.university || "N/A"}</strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 text-[10px] block">Corresponding Author:</span>
+                    <strong className="text-white block">{selectedReqForModal.academicProfile.correspondingAuthor?.name || "N/A"}</strong>
+                    {selectedReqForModal.academicProfile.correspondingAuthor?.designation && (
+                      <span className="text-slate-400 text-[10px] block mt-0.5">
+                        {selectedReqForModal.academicProfile.correspondingAuthor.designation}
+                      </span>
+                    )}
+                  </div>
+                  <div>
+                    <span className="text-slate-500 text-[10px] block">Supervisor:</span>
+                    <strong className="text-white block">{selectedReqForModal.academicProfile.supervisor?.name || "N/A"}</strong>
+                    {selectedReqForModal.academicProfile.supervisor?.designation && (
+                      <span className="text-slate-400 text-[10px] block mt-0.5">
+                        {selectedReqForModal.academicProfile.supervisor.designation}
+                      </span>
+                    )}
                   </div>
                   <div>
                     <span className="text-slate-500 text-[10px] block">Publication Type:</span>
@@ -1911,6 +2348,27 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ navigate
                       </span>
                     </div>
                   </div>
+
+                  {selectedReqForModal.referral && (
+                    <div className="p-3 rounded-xl border border-emerald-500/25 bg-emerald-500/10 text-xs">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[10px] uppercase tracking-wide text-emerald-200 font-semibold">
+                          Referral Applied
+                        </span>
+                        <span className="font-mono text-emerald-300 font-bold text-[11px]">
+                          {selectedReqForModal.referral.code}
+                        </span>
+                      </div>
+                      <p className="mt-2 text-emerald-50">
+                        Applied by <span className="font-semibold">{selectedReqForModal.referral.referrerName}</span>
+                      </p>
+                      <p className="mt-1 text-[11px] text-emerald-100/80">
+                        Discount: {formatCurrencyAmount(selectedReqForModal.referral.discountAmount, selectedReqForModal.referral.currency)}
+                        {' '}| Original: {formatCurrencyAmount(selectedReqForModal.referral.originalAmount, selectedReqForModal.referral.currency)}
+                        {' '}→ Final payable: {formatCurrencyAmount(selectedReqForModal.referral.finalAmount, selectedReqForModal.referral.currency)}
+                      </p>
+                    </div>
+                  )}
 
                   {selectedReqForModal.paymentSubmission.screenshotUrl && (
                     <div className="flex items-center gap-2 pt-1">
@@ -2352,8 +2810,8 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ navigate
       {/* DOMAIN EDIT/ADD MODAL                                                     */}
       {/* ========================================================================= */}
       {domainModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="glass-panel w-full max-w-md rounded-3xl border-slate-700 p-6 space-y-4">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-start justify-center p-4 overflow-y-auto">
+          <div className="glass-panel w-full max-w-md rounded-3xl border-slate-700 p-6 space-y-4 my-4">
             <h3 className="text-base font-bold text-white">
               {editingDomain ? "Edit Discipline" : "Add Discipline"}
             </h3>
@@ -2414,8 +2872,8 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ navigate
       {/* CATEGORY EDIT/ADD MODAL                                                   */}
       {/* ========================================================================= */}
       {categoryModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="glass-panel w-full max-w-md rounded-3xl border-slate-700 p-6 space-y-4">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-start justify-center p-4 overflow-y-auto">
+          <div className="glass-panel w-full max-w-md rounded-3xl border-slate-700 p-6 space-y-4 my-4">
             <h3 className="text-base font-bold text-white">
               {editingCategory ? "Edit Category" : "Add Category"}
             </h3>
@@ -2476,7 +2934,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ navigate
       {/* FAQ EDIT/ADD MODAL                                                        */}
       {/* ========================================================================= */}
       {faqModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-start justify-center p-4 overflow-y-auto">
           <div className="glass-panel w-full max-w-md rounded-3xl border-slate-700 p-6 space-y-4">
             <h3 className="text-base font-bold text-white">
               {editingFaq ? "Edit FAQ" : "Add FAQ Entry"}
@@ -2538,7 +2996,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ navigate
       {/* RESET PASSWORD MODAL                                                      */}
       {/* ========================================================================= */}
       {resetPasswordUser && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-start justify-center p-4 overflow-y-auto">
           <div className="glass-panel w-full max-w-md rounded-3xl border-slate-700 p-6 space-y-5 animate-scale-up shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2.5">

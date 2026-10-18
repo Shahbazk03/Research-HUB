@@ -9,6 +9,7 @@ import {
   CmsFaq,
   ReferenceDataMap,
   User,
+  ReferralCode,
 } from "./types";
 
 // Public APIs
@@ -107,9 +108,15 @@ export const submitCustomerPayment = async (
     payerUpiId?: string;
     screenshotUrl?: string;
     notes?: string;
+    referralCode?: string;
   }
 ): Promise<ServiceRequest> => {
   const res = await apiClient.post(`/requests/${id}/payment`, payload);
+  return res.data.data;
+};
+
+export const validateReferralCode = async (id: string, payload: { code: string; amount?: number }): Promise<any> => {
+  const res = await apiClient.post(`/requests/${id}/validate-referral`, payload);
   return res.data.data;
 };
 
@@ -155,6 +162,31 @@ export const updateAdminRequest = async (id: string, payload: any): Promise<Serv
 
 export const deleteAdminRequest = async (id: string): Promise<void> => {
   await apiClient.delete(`/admin/requests/${id}`);
+};
+
+export const getAdminReferralCodes = async (): Promise<ReferralCode[]> => {
+  const res = await apiClient.get("/admin/referrals");
+  return res.data.data;
+};
+
+export const createAdminReferralCode = async (payload: {
+  referrerName: string;
+  code: string;
+  discountAmount: number;
+  isActive?: boolean;
+  notes?: string;
+}): Promise<ReferralCode> => {
+  const res = await apiClient.post("/admin/referrals", payload);
+  return res.data.data;
+};
+
+export const updateAdminReferralCode = async (id: string, payload: Partial<ReferralCode>): Promise<ReferralCode> => {
+  const res = await apiClient.put(`/admin/referrals/${id}`, payload);
+  return res.data.data;
+};
+
+export const deleteAdminReferralCode = async (id: string): Promise<void> => {
+  await apiClient.delete(`/admin/referrals/${id}`);
 };
 
 export const getAdminServices = async (): Promise<Service[]> => {

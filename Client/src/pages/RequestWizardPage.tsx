@@ -36,7 +36,7 @@ export const RequestWizardPage: React.FC<RequestWizardPageProps> = ({
 }) => {
   const { user, isAuthenticated } = useAuth();
 
-  // Wizard Step (1 to 5)
+  // Wizard Step (1 to 6)
   const [currentStep, setCurrentStep] = useState<number>(1);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -45,10 +45,17 @@ export const RequestWizardPage: React.FC<RequestWizardPageProps> = ({
   // Form State
   const [formData, setFormData] = useState({
     // Step 1: Academic Profile
-    academicLevel: user?.academicLevel || "Ph.D. / Doctoral Candidate",
+    academicLevel: user?.academicLevel || "",
     discipline: "",
     university: user?.institution || "",
     department: user?.department || "",
+    correspondingAuthorName: "",
+    correspondingAuthorDesignation: "",
+    correspondingAuthorOrcidId: "",
+    coAuthors: [] as { name: string; designation: string; orcidId: string }[],
+    supervisorName: "",
+    supervisorDesignation: "",
+    supervisorOrcidId: "",
 
     // Step 2: Service & Scope
     serviceId: initialServiceId || "",
@@ -119,6 +126,29 @@ export const RequestWizardPage: React.FC<RequestWizardPageProps> = ({
     }));
   };
 
+  const addCoAuthor = () => {
+    setFormData((prev) => ({
+      ...prev,
+      coAuthors: [...prev.coAuthors, { name: "", designation: "", orcidId: "" }],
+    }));
+  };
+
+  const removeCoAuthor = (index: number) => {
+    setFormData((prev) => ({
+      ...prev,
+      coAuthors: prev.coAuthors.filter((_, i) => i !== index),
+    }));
+  };
+
+  const updateCoAuthor = (index: number, field: "name" | "designation" | "orcidId", value: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      coAuthors: prev.coAuthors.map((coAuthor, i) =>
+        i === index ? { ...coAuthor, [field]: value } : coAuthor
+      ),
+    }));
+  };
+
   const addReferenceFile = () => {
     if (!formData.newFileUrl.trim()) return;
     const newFile = {
@@ -150,6 +180,37 @@ export const RequestWizardPage: React.FC<RequestWizardPageProps> = ({
       }
       return true;
     }
+    if (currentStep === 5) {
+      if (!formData.correspondingAuthorName.trim()) {
+        setSubmitError("Please enter the corresponding author name.");
+        return false;
+      }
+
+      if (!formData.correspondingAuthorDesignation.trim()) {
+        setSubmitError("Please enter the corresponding author designation.");
+        return false;
+      }
+
+      if (formData.coAuthors.some((coAuthor) => {
+        const hasAnyValue = coAuthor.name.trim() || coAuthor.designation.trim() || coAuthor.orcidId.trim();
+        return hasAnyValue && (!coAuthor.name.trim() || !coAuthor.designation.trim());
+      })) {
+        setSubmitError("Each co-author must include both name and designation.");
+        return false;
+      }
+
+      if (!formData.supervisorName.trim()) {
+        setSubmitError("Please enter the supervisor name.");
+        return false;
+      }
+
+      if (!formData.supervisorDesignation.trim()) {
+        setSubmitError("Please enter the supervisor designation.");
+        return false;
+      }
+
+      return true;
+    }
     if (currentStep === 2) {
       if (!formData.serviceId) {
         setSubmitError("Please select a research service.");
@@ -172,7 +233,7 @@ export const RequestWizardPage: React.FC<RequestWizardPageProps> = ({
       }
       return true;
     }
-    if (currentStep === 5) {
+    if (currentStep === 6) {
       if (!formData.customerName.trim()) {
         setSubmitError("Please provide your name.");
         return false;
@@ -188,7 +249,7 @@ export const RequestWizardPage: React.FC<RequestWizardPageProps> = ({
 
   const handleNext = () => {
     if (validateStep()) {
-      setCurrentStep((prev) => Math.min(5, prev + 1));
+      setCurrentStep((prev) => Math.min(6, prev + 1));
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
   };
@@ -225,6 +286,23 @@ export const RequestWizardPage: React.FC<RequestWizardPageProps> = ({
           discipline: formData.discipline,
           university: formData.university,
           department: formData.department,
+          correspondingAuthor: {
+            name: formData.correspondingAuthorName.trim(),
+            designation: formData.correspondingAuthorDesignation.trim(),
+            orcidId: formData.correspondingAuthorOrcidId.trim() || undefined,
+          },
+          coAuthors: formData.coAuthors
+            .filter((coAuthor) => coAuthor.name.trim() || coAuthor.designation.trim() || coAuthor.orcidId.trim())
+            .map((coAuthor) => ({
+              name: coAuthor.name.trim(),
+              designation: coAuthor.designation.trim(),
+              orcidId: coAuthor.orcidId.trim() || undefined,
+            })),
+          supervisor: {
+            name: formData.supervisorName.trim(),
+            designation: formData.supervisorDesignation.trim(),
+            orcidId: formData.supervisorOrcidId.trim() || undefined,
+          },
           publicationType: formData.publicationType,
           targetJournal: formData.targetJournal,
           targetConference: formData.targetConference,
@@ -324,7 +402,7 @@ export const RequestWizardPage: React.FC<RequestWizardPageProps> = ({
   }
 
   return (
-    <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 pt-4 sm:pt-6 pb-12 space-y-6">
+    <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 pt-4 sm:pt-6 pb-12 space-y-6 min-w-0">
       {/* Header */}
       <div className="space-y-2 text-center max-w-xl mx-auto">
         <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-500/10 text-indigo-400 text-xs font-semibold border border-indigo-500/20">
@@ -341,20 +419,21 @@ export const RequestWizardPage: React.FC<RequestWizardPageProps> = ({
 
       {/* Stepper Indicator */}
       <div className="glass-panel p-3 sm:p-4 rounded-2xl border-slate-800">
-        <div className="grid grid-cols-5 gap-2 text-center text-xs">
+        <div className="flex items-stretch gap-1.5 overflow-x-auto pb-1 sm:pb-0">
           {[
             { step: 1, label: "Profile" },
             { step: 2, label: "Service" },
             { step: 3, label: "Requirements" },
             { step: 4, label: "Files" },
-            { step: 5, label: "Review" },
+            { step: 5, label: "Authors" },
+            { step: 6, label: "Review" },
           ].map((item) => {
             const isCompleted = currentStep > item.step;
             const isCurrent = currentStep === item.step;
             return (
               <div
                 key={item.step}
-                className={`py-2 px-1 rounded-xl transition-all ${
+                className={`shrink-0 flex-1 min-w-[70px] py-2 px-1.5 rounded-xl transition-all text-center text-xs ${
                   isCurrent
                     ? "bg-indigo-600/30 text-indigo-300 border border-indigo-500/40 font-bold"
                     : isCompleted
@@ -366,6 +445,7 @@ export const RequestWizardPage: React.FC<RequestWizardPageProps> = ({
                   <span>{isCompleted ? "✓" : `0${item.step}`}</span>
                   <span className="hidden sm:inline">{item.label}</span>
                 </div>
+                <span className="sm:hidden block text-[10px] mt-0.5">{item.label}</span>
               </div>
             );
           })}
@@ -404,6 +484,7 @@ export const RequestWizardPage: React.FC<RequestWizardPageProps> = ({
                   onChange={(e) => updateField("academicLevel", e.target.value)}
                   className="w-full p-3 rounded-xl glass-input text-xs text-white bg-slate-900"
                 >
+                  <option value="">Select academic level...</option>
                   {refData?.academic_levels?.map((lvl) => (
                     <option key={lvl.id} value={lvl.label}>
                       {lvl.label}
@@ -873,12 +954,169 @@ export const RequestWizardPage: React.FC<RequestWizardPageProps> = ({
         )}
 
         {/* ========================================================================= */}
-        {/* STEP 5: CONTACT & FINAL REVIEW                                            */}
+        {/* STEP 5: AUTHOR & SUPERVISOR DETAILS                                      */}
         {/* ========================================================================= */}
         {currentStep === 5 && (
           <div className="space-y-6 animate-fade-in">
             <div className="border-b border-slate-800 pb-3">
-              <h3 className="text-base font-bold text-white">Step 5: Contact Preferences & Review</h3>
+              <h3 className="text-base font-bold text-white">Step 5: Author & Supervisor Details</h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Add the corresponding author, co-authors, and supervisor details before final submission.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  Corresponding Author Name *
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g., Asha Kumar"
+                  value={formData.correspondingAuthorName}
+                  onChange={(e) => updateField("correspondingAuthorName", e.target.value)}
+                  className="w-full p-3 rounded-xl glass-input text-xs text-white placeholder-slate-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  Corresponding Author Designation *
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g., Lead Author / Research Scholar"
+                  value={formData.correspondingAuthorDesignation}
+                  onChange={(e) => updateField("correspondingAuthorDesignation", e.target.value)}
+                  className="w-full p-3 rounded-xl glass-input text-xs text-white placeholder-slate-500"
+                />
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  Corresponding Author ORCID ID (optional)
+                </label>
+                <input
+                  type="text"
+                  placeholder="https://orcid.org/0000-0000-0000-0000"
+                  value={formData.correspondingAuthorOrcidId}
+                  onChange={(e) => updateField("correspondingAuthorOrcidId", e.target.value)}
+                  className="w-full p-3 rounded-xl glass-input text-xs text-white placeholder-slate-500"
+                />
+              </div>
+
+              <div className="sm:col-span-2">
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-xs font-semibold text-slate-300">
+                    Co-Authors
+                  </label>
+                  <button
+                    type="button"
+                    onClick={addCoAuthor}
+                    className="px-2.5 py-1.5 rounded-lg border border-indigo-500/40 bg-indigo-500/10 text-[10px] font-semibold text-indigo-300 hover:bg-indigo-500/20 transition-colors"
+                  >
+                    + Add Co-author
+                  </button>
+                </div>
+
+                <div className="space-y-3">
+                  {formData.coAuthors.length === 0 ? (
+                    <div className="text-[11px] text-slate-500 border border-dashed border-slate-700 rounded-xl p-3">
+                      No co-authors added yet. You can add multiple authors if needed.
+                    </div>
+                  ) : (
+                    formData.coAuthors.map((coAuthor, index) => (
+                      <div key={index} className="flex flex-col gap-2 rounded-xl border border-slate-700 bg-slate-950/40 p-3">
+                        <div className="flex justify-between items-center">
+                          <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                            Co-author {index + 1}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => removeCoAuthor(index)}
+                            className="text-[10px] text-rose-300 hover:text-rose-200"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <input
+                            type="text"
+                            placeholder="Co-author name"
+                            value={coAuthor.name}
+                            onChange={(e) => updateCoAuthor(index, "name", e.target.value)}
+                            className="w-full p-2.5 rounded-lg glass-input text-xs text-white placeholder-slate-500"
+                          />
+                          <input
+                            type="text"
+                            placeholder="Designation"
+                            value={coAuthor.designation}
+                            onChange={(e) => updateCoAuthor(index, "designation", e.target.value)}
+                            className="w-full p-2.5 rounded-lg glass-input text-xs text-white placeholder-slate-500"
+                          />
+                          <input
+                            type="text"
+                            placeholder="ORCID ID (optional)"
+                            value={coAuthor.orcidId}
+                            onChange={(e) => updateCoAuthor(index, "orcidId", e.target.value)}
+                            className="sm:col-span-2 w-full p-2.5 rounded-lg glass-input text-xs text-white placeholder-slate-500"
+                          />
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  Supervisor Name *
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g., Dr. Ananya Sen"
+                  value={formData.supervisorName}
+                  onChange={(e) => updateField("supervisorName", e.target.value)}
+                  className="w-full p-3 rounded-xl glass-input text-xs text-white placeholder-slate-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  Supervisor Designation *
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g., Professor / Supervisor"
+                  value={formData.supervisorDesignation}
+                  onChange={(e) => updateField("supervisorDesignation", e.target.value)}
+                  className="w-full p-3 rounded-xl glass-input text-xs text-white placeholder-slate-500"
+                />
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  Supervisor ORCID ID (optional)
+                </label>
+                <input
+                  type="text"
+                  placeholder="https://orcid.org/0000-0000-0000-0000"
+                  value={formData.supervisorOrcidId}
+                  onChange={(e) => updateField("supervisorOrcidId", e.target.value)}
+                  className="w-full p-3 rounded-xl glass-input text-xs text-white placeholder-slate-500"
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* STEP 6: CONTACT & FINAL REVIEW                                            */}
+        {/* ========================================================================= */}
+        {currentStep === 6 && (
+          <div className="space-y-6 animate-fade-in">
+            <div className="border-b border-slate-800 pb-3">
+              <h3 className="text-base font-bold text-white">Step 6: Contact Preferences & Review</h3>
               <p className="text-xs text-slate-400 mt-0.5">
                 Where should our academic coordinator send quotation and timeline updates?
               </p>
@@ -984,7 +1222,7 @@ export const RequestWizardPage: React.FC<RequestWizardPageProps> = ({
             <div />
           )}
 
-          {currentStep < 5 ? (
+          {currentStep < 6 ? (
             <button
               type="button"
               onClick={handleNext}

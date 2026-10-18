@@ -56,7 +56,7 @@ export const ServiceDetailPage: React.FC<ServiceDetailPageProps> = ({
   }
 
   return (
-    <div className="w-full max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 pt-4 sm:pt-6 pb-12 space-y-6">
+    <div className="w-full max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 pt-4 sm:pt-6 pb-12 space-y-6 min-w-0">
       {/* Back Link */}
       <button
         onClick={() => navigate("services")}
