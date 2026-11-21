@@ -16,7 +16,6 @@
 import fs from "fs/promises";
 import path from "path";
 import { createRequire } from "module";
-import Anthropic from "@anthropic-ai/sdk";
 const require = createRequire(import.meta.url);
 const EMPTY = {
     title: "",
@@ -96,7 +95,9 @@ const SYSTEM_PROMPT = "You extract structured profile data from academic CVs for
     "Use only information that is explicitly present in the CV. Never guess or invent details; use an empty string or empty list when something is not stated. " +
     "Copy publication titles exactly as written. The bio must be a neutral summary of what the CV says, written in third person.";
 const extractWithClaude = async (filePath, ext) => {
-    const client = new Anthropic();
+    // Loaded on demand so a missing optional package can never stop the server from starting
+    const { default: AnthropicClient } = await import("@anthropic-ai/sdk");
+    const client = new AnthropicClient();
     let documentBlock;
     if (ext === ".pdf") {
         const data = (await fs.readFile(filePath)).toString("base64");

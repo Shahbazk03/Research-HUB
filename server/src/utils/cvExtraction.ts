@@ -16,7 +16,7 @@
 import fs from "fs/promises";
 import path from "path";
 import { createRequire } from "module";
-import Anthropic from "@anthropic-ai/sdk";
+import type Anthropic from "@anthropic-ai/sdk";
 
 const require = createRequire(import.meta.url);
 
@@ -137,7 +137,9 @@ const SYSTEM_PROMPT =
     "Copy publication titles exactly as written. The bio must be a neutral summary of what the CV says, written in third person.";
 
 const extractWithClaude = async (filePath: string, ext: string): Promise<CvProfile> => {
-    const client = new Anthropic();
+    // Loaded on demand so a missing optional package can never stop the server from starting
+    const { default: AnthropicClient } = await import("@anthropic-ai/sdk");
+    const client = new AnthropicClient();
 
     let documentBlock: Anthropic.Beta.BetaContentBlockParam;
     if (ext === ".pdf") {
