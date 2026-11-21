@@ -1,5 +1,8 @@
 import mongoose from "mongoose";
-import ServiceRequest from "../models/ServiceRequest.js";
+import ServiceRequest, { isValidStatusTransition } from "../models/ServiceRequest.js";
+import User from "../models/User.js";
+import { USER_ROLES } from "../types/roles.js";
+import { addActivity, cleanFileList, isSafeHttpUrl } from "../utils/requestActivity.js";
 /*
 |--------------------------------------------------------------------------
 | Helpers
@@ -151,7 +154,7 @@ export const getAdminServiceRequests = async (req, res, next) => {
         */
         const [requests, total] = await Promise.all([
             ServiceRequest.find(filter)
-                .populate("serviceId", "name slug description basePrice")
+                .populate("serviceId", "name slug description pricingModel priceAmount priceRange currency turnaroundTime")
                 .populate("domainId", "name slug description")
                 .populate("categoryId", "name slug description")
                 .populate("templateId", "name version isPublished")
@@ -212,7 +215,7 @@ export const getAdminServiceRequestById = async (req, res, next) => {
         |--------------------------------------------------------------------------
         */
         const serviceRequest = await ServiceRequest.findById(id)
-            .populate("serviceId", "name slug description basePrice")
+            .populate("serviceId", "name slug description pricingModel priceAmount priceRange currency turnaroundTime")
             .populate("domainId", "name slug description")
             .populate("categoryId", "name slug description")
             .populate("templateId", "name version isPublished")
@@ -269,248 +272,219 @@ export const getAdminServiceRequestById = async (req, res, next) => {
 export const updateAdminServiceRequest = async (req, res, next) => {
     try {
         const id = getParamString(req.params.id);
-        /*
-        |--------------------------------------------------------------------------
-        | Validate ID
-        |--------------------------------------------------------------------------
-        */
         if (!isValidObjectId(id)) {
-            res.status(400).json({
+            res.status(400).json({ success: false, message: "Invalid request ID" });
+            return;
+        }
+        const body = req.body && typeof req.body === "object" ? req.body : {};
+        const { name, email, phone, whatsapp, status, requirements, referenceFiles, additionalMessage, preferredContactMethod, adminNotes, quotation, paymentQr, finalDeliverable, paymentVerificationAction, paymentVerificationNotes, message, messageFiles, } = body;
+        /*
+        | Money-related fields are ADMIN only. Team members can progress work,
+        | write notes, message the customer and deliver files, but cannot set
+        | prices, change where customers pay, or confirm payments.
+        */
+        const isAdmin = req.user?.role === USER_ROLES.ADMIN;
+        const adminOnlyTouched = ["quotation", "paymentQr", "paymentVerificationAction", "paymentSubmission"].filter((key) => body[key] !== undefined);
+        if (!isAdmin && adminOnlyTouched.length > 0) {
+            res.status(403).json({
                 success: false,
-                message: "Invalid request ID",
+                message: "Only administrators can change quotations, payment QR codes or payment verification.",
             });
             return;
         }
-        const { name, email, phone, whatsapp, status, requirements, referenceFiles, additionalMessage, preferredContactMethod, adminNotes, quotation, paymentQr, finalDeliverable, paymentSubmission, paymentVerificationAction, paymentVerificationNotes, } = req.body;
-        /*
-        |--------------------------------------------------------------------------
-        | Validate Status
-        |--------------------------------------------------------------------------
-        */
-        if (status !== undefined &&
-            !ALLOWED_STATUSES.includes(status)) {
+        if (body.paymentSubmission !== undefined) {
             res.status(400).json({
                 success: false,
-                message: "Invalid request status",
-                allowedStatuses: ALLOWED_STATUSES,
+                message: "Payment submissions are recorded by the customer. Use the verify / reject actions instead.",
             });
             return;
         }
-        /*
-        |--------------------------------------------------------------------------
-        | Validate Contact Method
-        |--------------------------------------------------------------------------
-        */
-        if (preferredContactMethod !==
-            undefined &&
+        if (status !== undefined && !ALLOWED_STATUSES.includes(status)) {
+            res.status(400).json({ success: false, message: "Invalid request status", allowedStatuses: ALLOWED_STATUSES });
+            return;
+        }
+        if (preferredContactMethod !== undefined &&
             !ALLOWED_CONTACT_METHODS.includes(preferredContactMethod)) {
-            res.status(400).json({
-                success: false,
-                message: "Invalid preferred contact method",
-                allowedContactMethods: ALLOWED_CONTACT_METHODS,
-            });
+            res.status(400).json({ success: false, message: "Invalid preferred contact method" });
             return;
         }
-        /*
-        |--------------------------------------------------------------------------
-        | Validate Requirements
-        |--------------------------------------------------------------------------
-        */
         if (requirements !== undefined &&
-            (typeof requirements !==
-                "object" ||
-                requirements === null ||
-                Array.isArray(requirements))) {
-            res.status(400).json({
-                success: false,
-                message: "requirements must be an object",
-            });
+            (typeof requirements !== "object" || requirements === null || Array.isArray(requirements))) {
+            res.status(400).json({ success: false, message: "requirements must be an object" });
             return;
         }
-        /*
-        |--------------------------------------------------------------------------
-        | Validate Reference Files
-        |--------------------------------------------------------------------------
-        */
-        if (referenceFiles !== undefined) {
-            if (!Array.isArray(referenceFiles)) {
-                res.status(400).json({
-                    success: false,
-                    message: "referenceFiles must be an array",
-                });
+        if (referenceFiles !== undefined && !Array.isArray(referenceFiles)) {
+            res.status(400).json({ success: false, message: "referenceFiles must be an array" });
+            return;
+        }
+        if (paymentVerificationAction !== undefined &&
+            paymentVerificationAction !== "VERIFY" &&
+            paymentVerificationAction !== "REJECT") {
+            res.status(400).json({ success: false, message: "paymentVerificationAction must be VERIFY or REJECT" });
+            return;
+        }
+        let quotationAmount;
+        if (quotation && typeof quotation === "object") {
+            quotationAmount = Number(quotation.amount);
+            if (!Number.isFinite(quotationAmount) || quotationAmount <= 0) {
+                res.status(400).json({ success: false, message: "Quotation amount must be a positive number" });
                 return;
             }
-            for (const file of referenceFiles) {
-                if (!file ||
-                    typeof file !==
-                        "object" ||
-                    !file.name ||
-                    !file.url) {
-                    res.status(400).json({
-                        success: false,
-                        message: "Every reference file must contain name and url",
-                    });
+        }
+        if (paymentQr && typeof paymentQr === "object" && paymentQr.url && !isSafeHttpUrl(paymentQr.url)) {
+            res.status(400).json({ success: false, message: "Payment QR must be an uploaded image URL" });
+            return;
+        }
+        if (finalDeliverable && typeof finalDeliverable === "object") {
+            for (const key of ["fileUrl", "doiUrl"]) {
+                if (finalDeliverable[key] && !isSafeHttpUrl(finalDeliverable[key])) {
+                    res.status(400).json({ success: false, message: `Deliverable ${key} must be an http(s) link` });
                     return;
                 }
             }
         }
-        /*
-        |--------------------------------------------------------------------------
-        | Build Update Object
-        |--------------------------------------------------------------------------
-        */
-        const update = {};
-        /*
-        |--------------------------------------------------------------------------
-        | Customer Fields
-        |--------------------------------------------------------------------------
-        */
-        if (name !== undefined) {
-            update["customer.name"] =
-                name;
-        }
-        if (email !== undefined) {
-            update["customer.email"] =
-                email;
-        }
-        if (phone !== undefined) {
-            update["customer.phone"] =
-                phone;
-        }
-        if (whatsapp !== undefined) {
-            update["customer.whatsapp"] =
-                whatsapp;
-        }
-        /*
-        |--------------------------------------------------------------------------
-        | Request Fields
-        |--------------------------------------------------------------------------
-        */
-        if (status !== undefined) {
-            update.status = status;
-        }
-        if (requirements !== undefined) {
-            update.requirements =
-                requirements;
-        }
-        if (referenceFiles !==
-            undefined) {
-            update.referenceFiles =
-                referenceFiles;
-        }
-        if (additionalMessage !==
-            undefined) {
-            update.additionalMessage =
-                additionalMessage;
-        }
-        if (preferredContactMethod !==
-            undefined) {
-            update.preferredContactMethod =
-                preferredContactMethod;
-        }
-        if (adminNotes !== undefined) {
-            update.adminNotes = adminNotes;
-        }
-        if (quotation !== undefined) {
-            if (typeof quotation === "object" && quotation !== null) {
-                update.quotation = {
-                    amount: quotation.amount !== undefined ? Number(quotation.amount) : undefined,
-                    currency: quotation.currency || "INR",
-                    notes: quotation.notes || "",
-                    providedAt: quotation.providedAt || new Date(),
-                };
-            }
-            else {
-                update.quotation = undefined;
-            }
-        }
-        if (paymentQr !== undefined) {
-            if (typeof paymentQr === "object" && paymentQr !== null) {
-                update.paymentQr = {
-                    url: paymentQr.url || "",
-                    upiId: paymentQr.upiId || "",
-                    uploadedAt: new Date(),
-                };
-            }
-            else {
-                update.paymentQr = undefined;
-            }
-        }
-        if (finalDeliverable !== undefined) {
-            if (typeof finalDeliverable === "object" && finalDeliverable !== null) {
-                update.finalDeliverable = {
-                    fileName: finalDeliverable.fileName || "",
-                    fileUrl: finalDeliverable.fileUrl || "",
-                    fileSize: finalDeliverable.fileSize || 0,
-                    doiUrl: finalDeliverable.doiUrl || "",
-                    notes: finalDeliverable.notes || "",
-                    uploadedAt: new Date(),
-                };
-            }
-            else {
-                update.finalDeliverable = undefined;
-            }
-        }
-        if (paymentSubmission !== undefined) {
-            update.paymentSubmission = paymentSubmission;
-        }
-        if (paymentVerificationAction !== undefined) {
-            const isVerified = paymentVerificationAction === "VERIFY";
-            update["paymentSubmission.status"] = isVerified ? "VERIFIED" : "REJECTED";
-            update["paymentSubmission.verifiedAt"] = new Date();
-            if (paymentVerificationNotes !== undefined) {
-                update["paymentSubmission.adminVerificationNotes"] = paymentVerificationNotes;
-            }
-        }
-        /*
-        |--------------------------------------------------------------------------
-        | Prevent Empty Update
-        |--------------------------------------------------------------------------
-        */
-        if (Object.keys(update).length ===
-            0) {
-            res.status(400).json({
-                success: false,
-                message: "No fields provided for update",
-            });
+        const messageText = typeof message === "string" ? message.trim() : "";
+        if (messageText.length > 5000) {
+            res.status(400).json({ success: false, message: "Message must be 5000 characters or fewer" });
             return;
         }
-        /*
-        |--------------------------------------------------------------------------
-        | Update Database
-        |--------------------------------------------------------------------------
-        */
-        const serviceRequest = await ServiceRequest.findByIdAndUpdate(id, {
-            $set: update,
-        }, {
-            new: true,
-            runValidators: true,
-        })
-            .populate("serviceId", "name slug description basePrice")
+        const serviceRequest = await ServiceRequest.findById(id);
+        if (!serviceRequest) {
+            res.status(404).json({ success: false, message: "Service request not found" });
+            return;
+        }
+        const staff = await User.findById(req.user?.userId).select("firstName lastName");
+        const actorName = staff ? `${staff.firstName} ${staff.lastName || ""}`.trim() : "Research Hub team";
+        const log = (entry) => addActivity(serviceRequest, { actor: "STAFF", actorName, ...entry });
+        /* Customer & request fields */
+        if (name !== undefined)
+            serviceRequest.customer.name = String(name).trim();
+        if (email !== undefined)
+            serviceRequest.customer.email = String(email).trim().toLowerCase();
+        if (phone !== undefined)
+            serviceRequest.customer.phone = String(phone ?? "").trim();
+        if (whatsapp !== undefined)
+            serviceRequest.customer.whatsapp = String(whatsapp ?? "").trim();
+        if (requirements !== undefined) {
+            serviceRequest.requirements = requirements;
+            serviceRequest.markModified("requirements");
+        }
+        if (referenceFiles !== undefined)
+            serviceRequest.referenceFiles = cleanFileList(referenceFiles, 50);
+        if (additionalMessage !== undefined)
+            serviceRequest.additionalMessage = String(additionalMessage ?? "").trim();
+        if (preferredContactMethod !== undefined)
+            serviceRequest.preferredContactMethod = preferredContactMethod;
+        if (adminNotes !== undefined)
+            serviceRequest.adminNotes = String(adminNotes ?? "");
+        /* Status (transition rules enforced) */
+        if (status !== undefined && status !== serviceRequest.status) {
+            if (!isValidStatusTransition(serviceRequest.status, status)) {
+                res.status(400).json({
+                    success: false,
+                    message: `A request cannot move from ${serviceRequest.status} to ${status}.`,
+                });
+                return;
+            }
+            serviceRequest.status = status;
+            log({ type: "STATUS", status });
+        }
+        /* Quotation (null clears it) */
+        if (quotation !== undefined) {
+            if (quotation && typeof quotation === "object" && quotationAmount !== undefined) {
+                const currency = String(quotation.currency || "INR").trim().toUpperCase().slice(0, 3) || "INR";
+                const changed = serviceRequest.quotation?.amount !== quotationAmount ||
+                    serviceRequest.quotation?.currency !== currency;
+                serviceRequest.set("quotation", {
+                    amount: quotationAmount,
+                    currency,
+                    notes: String(quotation.notes || "").trim(),
+                    providedAt: changed ? new Date() : serviceRequest.quotation?.providedAt || new Date(),
+                });
+                if (changed) {
+                    log({ type: "QUOTATION", message: `Quotation issued: ${currency} ${quotationAmount.toLocaleString("en-IN")}` });
+                }
+            }
+            else {
+                serviceRequest.set("quotation", undefined);
+            }
+        }
+        /* Payment QR (null clears it) */
+        if (paymentQr !== undefined) {
+            if (paymentQr && typeof paymentQr === "object" && paymentQr.url) {
+                serviceRequest.set("paymentQr", {
+                    url: String(paymentQr.url).trim(),
+                    upiId: String(paymentQr.upiId || "").trim(),
+                    uploadedAt: new Date(),
+                });
+            }
+            else {
+                serviceRequest.set("paymentQr", undefined);
+            }
+        }
+        /* Final deliverable (null clears it) */
+        if (finalDeliverable !== undefined) {
+            if (finalDeliverable && typeof finalDeliverable === "object" && (finalDeliverable.fileUrl || finalDeliverable.doiUrl)) {
+                const isNew = finalDeliverable.fileUrl !== serviceRequest.finalDeliverable?.fileUrl ||
+                    finalDeliverable.doiUrl !== serviceRequest.finalDeliverable?.doiUrl;
+                serviceRequest.set("finalDeliverable", {
+                    fileName: String(finalDeliverable.fileName || "").trim(),
+                    fileUrl: String(finalDeliverable.fileUrl || "").trim(),
+                    fileSize: Number(finalDeliverable.fileSize) || 0,
+                    doiUrl: String(finalDeliverable.doiUrl || "").trim(),
+                    notes: String(finalDeliverable.notes || "").trim(),
+                    uploadedAt: isNew ? new Date() : serviceRequest.finalDeliverable?.uploadedAt || new Date(),
+                });
+                if (isNew)
+                    log({ type: "DELIVERABLE", message: "Final deliverable shared" });
+            }
+            else {
+                serviceRequest.set("finalDeliverable", undefined);
+            }
+        }
+        /* Payment verification */
+        if (paymentVerificationAction !== undefined) {
+            if (!serviceRequest.paymentSubmission?.transactionId) {
+                res.status(400).json({ success: false, message: "The customer has not submitted a payment to verify" });
+                return;
+            }
+            const verified = paymentVerificationAction === "VERIFY";
+            const notes = typeof paymentVerificationNotes === "string" ? paymentVerificationNotes.trim() : "";
+            serviceRequest.set("paymentSubmission.status", verified ? "VERIFIED" : "REJECTED");
+            serviceRequest.set("paymentSubmission.verifiedAt", new Date());
+            serviceRequest.set("paymentSubmission.adminVerificationNotes", notes);
+            log({
+                type: verified ? "PAYMENT_VERIFIED" : "PAYMENT_REJECTED",
+                message: verified ? "Payment confirmed" : notes || "Payment could not be verified",
+            });
+            // Confirmed payment starts the work unless an explicit status was chosen in this same save
+            if (verified &&
+                status === undefined &&
+                isValidStatusTransition(serviceRequest.status, "IN_PROGRESS") &&
+                serviceRequest.status !== "IN_PROGRESS") {
+                serviceRequest.status = "IN_PROGRESS";
+                log({ type: "STATUS", status: "IN_PROGRESS" });
+            }
+        }
+        /* Message to customer */
+        const cleanMessageFiles = cleanFileList(messageFiles, 10);
+        if (messageText || cleanMessageFiles.length > 0) {
+            log({
+                type: "MESSAGE",
+                message: messageText || undefined,
+                files: cleanMessageFiles.map((f) => ({ name: f.name, url: f.url })),
+            });
+        }
+        await serviceRequest.save();
+        const populated = await ServiceRequest.findById(id)
+            .populate("serviceId", "name slug description pricingModel priceAmount priceRange currency turnaroundTime")
             .populate("domainId", "name slug description")
             .populate("categoryId", "name slug description")
             .populate("templateId", "name version isPublished");
-        /*
-        |--------------------------------------------------------------------------
-        | Not Found
-        |--------------------------------------------------------------------------
-        */
-        if (!serviceRequest) {
-            res.status(404).json({
-                success: false,
-                message: "Service request not found",
-            });
-            return;
-        }
-        /*
-        |--------------------------------------------------------------------------
-        | Success
-        |--------------------------------------------------------------------------
-        */
         res.status(200).json({
             success: true,
             message: "Service request updated successfully",
-            data: serviceRequest,
+            data: populated,
         });
     }
     catch (error) {
@@ -590,45 +564,46 @@ export const updateAdminServiceRequestStatus = async (req, res, next) => {
     try {
         const id = getParamString(req.params.id);
         if (!isValidObjectId(id)) {
-            res.status(400).json({
-                success: false,
-                message: "Invalid request ID",
-            });
+            res.status(400).json({ success: false, message: "Invalid request ID" });
             return;
         }
-        const { status } = req.body;
-        if (!status ||
-            !ALLOWED_STATUSES.includes(status)) {
-            res.status(400).json({
-                success: false,
-                message: "Invalid request status",
-                allowedStatuses: ALLOWED_STATUSES,
-            });
+        const { status } = req.body ?? {};
+        if (!status || !ALLOWED_STATUSES.includes(status)) {
+            res.status(400).json({ success: false, message: "Invalid request status", allowedStatuses: ALLOWED_STATUSES });
             return;
         }
-        const serviceRequest = await ServiceRequest.findByIdAndUpdate(id, {
-            $set: {
+        const serviceRequest = await ServiceRequest.findById(id);
+        if (!serviceRequest) {
+            res.status(404).json({ success: false, message: "Service request not found" });
+            return;
+        }
+        if (status !== serviceRequest.status) {
+            if (!isValidStatusTransition(serviceRequest.status, status)) {
+                res.status(400).json({
+                    success: false,
+                    message: `A request cannot move from ${serviceRequest.status} to ${status}.`,
+                });
+                return;
+            }
+            const staff = await User.findById(req.user?.userId).select("firstName lastName");
+            serviceRequest.status = status;
+            addActivity(serviceRequest, {
+                type: "STATUS",
+                actor: "STAFF",
+                actorName: staff ? `${staff.firstName} ${staff.lastName || ""}`.trim() : "Research Hub team",
                 status,
-            },
-        }, {
-            new: true,
-            runValidators: true,
-        })
+            });
+            await serviceRequest.save();
+        }
+        const populated = await ServiceRequest.findById(id)
             .populate("serviceId", "name slug")
             .populate("domainId", "name slug")
             .populate("categoryId", "name slug")
             .populate("templateId", "name version isPublished");
-        if (!serviceRequest) {
-            res.status(404).json({
-                success: false,
-                message: "Service request not found",
-            });
-            return;
-        }
         res.status(200).json({
             success: true,
             message: "Service request status updated successfully",
-            data: serviceRequest,
+            data: populated,
         });
     }
     catch (error) {

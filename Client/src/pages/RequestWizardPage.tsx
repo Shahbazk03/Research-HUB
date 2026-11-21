@@ -1,1258 +1,1111 @@
-import React, { useState, useEffect } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Sparkles,
-  CheckCircle2,
-  ArrowRight,
   ArrowLeft,
-  GraduationCap,
-  BookOpen,
+  ArrowRight,
+  Check,
+  CheckCircle2,
+  ChevronDown,
   FileText,
+  Link2,
+  Lock,
   Paperclip,
-  Send,
-  MessageSquare,
-  AlertCircle,
-  HelpCircle,
+  Plus,
+  Trash2,
+  Upload,
 } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
-import {
-  getPublicServices,
-  getPublicDomains,
-  getPublicReferenceData,
-  getPublicServiceTemplate,
-  submitServiceRequest,
-} from "../api";
+import { getErrorMessage, getPublicServiceTemplate, submitServiceRequest, uploadFile } from "../api";
+import { RequirementField, Service, ServiceRequest } from "../api/types";
 import { useAuth } from "../context/AuthContext";
-import { WhatsAppButton } from "../components/common/WhatsAppButton";
-import { RequirementField } from "../api/types";
+import { AppLink, ErrorState, Field, PageLoader, Spinner, useDocumentTitle } from "../components/ui";
+import { ServicePicker } from "../components/ServicePicker";
+import { ACADEMIC_DESIGNATIONS, APPLICANT_TYPES, ComboInput, INVENTOR_DESIGNATIONS } from "../components/ComboInput";
+import { isIpService, useAllServices, useDomains, useReferenceData } from "../hooks/usePublicData";
+import { Navigate } from "../router";
 
-interface RequestWizardPageProps {
-  navigate: (route: string, params?: any) => void;
-  initialServiceId?: string;
+/* -------------------------------------------------------------------------- */
+/* Draft state (persisted so nothing is lost when the visitor has to sign in)  */
+/* -------------------------------------------------------------------------- */
+
+type Person = { name: string; designation: string; email: string };
+type FileRef = { name: string; url: string; size?: number };
+
+interface Draft {
+  serviceId: string;
+  requirements: Record<string, unknown>;
+  topic: string;
+  brief: string;
+  deadline: string;
+  publicationType: string;
+  targetJournal: string;
+  indexingRequirement: string;
+  citationStyle: string;
+  files: FileRef[];
+  notes: string;
+  name: string;
+  email: string;
+  whatsapp: string;
+  contactMethod: "WHATSAPP" | "EMAIL" | "PHONE";
+  institution: string;
+  department: string;
+  academicLevel: string;
+  lead: Person;
+  supervisor: Person;
+  others: Person[];
+  consent: boolean;
 }
 
-export const RequestWizardPage: React.FC<RequestWizardPageProps> = ({
-  navigate,
-  initialServiceId,
-}) => {
+const emptyPerson = (): Person => ({ name: "", designation: "", email: "" });
+
+const EMPTY_DRAFT: Draft = {
+  serviceId: "",
+  requirements: {},
+  topic: "",
+  brief: "",
+  deadline: "",
+  publicationType: "",
+  targetJournal: "",
+  indexingRequirement: "",
+  citationStyle: "",
+  files: [],
+  notes: "",
+  name: "",
+  email: "",
+  whatsapp: "",
+  contactMethod: "WHATSAPP",
+  institution: "",
+  department: "",
+  academicLevel: "",
+  lead: emptyPerson(),
+  supervisor: emptyPerson(),
+  others: [],
+  consent: false,
+};
+
+const DRAFT_KEY = "rh_request_draft";
+
+const loadDraft = (): Draft => {
+  try {
+    const raw = sessionStorage.getItem(DRAFT_KEY);
+    if (raw) return { ...EMPTY_DRAFT, ...JSON.parse(raw) };
+  } catch {
+    /* storage unavailable */
+  }
+  return EMPTY_DRAFT;
+};
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const isEmpty = (v: unknown) => v === undefined || v === null || v === "" || (Array.isArray(v) && v.length === 0);
+
+/* -------------------------------------------------------------------------- */
+
+export const RequestWizardPage: React.FC<{ navigate: Navigate; initialService?: string }> = ({ navigate, initialService }) => {
+  useDocumentTitle("Start a request");
   const { user, isAuthenticated } = useAuth();
+  const queryClient = useQueryClient();
 
-  // Wizard Step (1 to 6)
-  const [currentStep, setCurrentStep] = useState<number>(1);
-  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const services = useAllServices();
+  const domains = useDomains();
+  const refData = useReferenceData();
+
+  const [draft, setDraft] = useState<Draft>(loadDraft);
+  const [step, setStep] = useState<1 | 2>(1);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [submittedRequest, setSubmittedRequest] = useState<any | null>(null);
+  const [submitted, setSubmitted] = useState<ServiceRequest | null>(null);
+  const [showPrefs, setShowPrefs] = useState(false);
+  const formTop = useRef<HTMLDivElement>(null);
 
-  // Form State
-  const [formData, setFormData] = useState({
-    // Step 1: Academic Profile
-    academicLevel: user?.academicLevel || "",
-    discipline: "",
-    university: user?.institution || "",
-    department: user?.department || "",
-    correspondingAuthorName: "",
-    correspondingAuthorDesignation: "",
-    correspondingAuthorOrcidId: "",
-    coAuthors: [] as { name: string; designation: string; orcidId: string }[],
-    supervisorName: "",
-    supervisorDesignation: "",
-    supervisorOrcidId: "",
+  const update = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
 
-    // Step 2: Service & Scope
-    serviceId: initialServiceId || "",
-    publicationType: "Original Journal Article",
-    targetJournal: "",
-    targetConference: "",
-    indexingRequirement: "Scopus",
-    citationStyle: "IEEE Style",
-    wordCount: 6000,
-    deadline: "",
-
-    // Step 3: Dynamic Requirements (keyed by field.key)
-    requirements: {} as Record<string, any>,
-
-    // Step 4: Guidelines & Attachments
-    referenceFiles: [] as { name: string; url: string; size?: number }[],
-    newFileName: "",
-    newFileUrl: "",
-    additionalMessage: "",
-
-    // Step 5: Contact Info
-    customerName: user ? `${user.firstName} ${user.lastName || ""}`.trim() : "",
-    customerEmail: user?.email || "",
-    customerPhone: user?.phone || "",
-    customerWhatsapp: user?.whatsapp || user?.phone || "",
-    preferredContactMethod: "WHATSAPP" as "WHATSAPP" | "EMAIL" | "PHONE",
-  });
-
-  // Queries
-  const { data: services = [] } = useQuery({
-    queryKey: ["public-services"],
-    queryFn: () => getPublicServices(),
-  });
-
-  const { data: domains = [] } = useQuery({
-    queryKey: ["public-domains"],
-    queryFn: getPublicDomains,
-  });
-
-  const { data: refData } = useQuery({
-    queryKey: ["public-reference-data"],
-    queryFn: getPublicReferenceData,
-  });
-
-  // Auto-select first service if none selected
+  // Persist the draft for this tab
   useEffect(() => {
-    if (!formData.serviceId && services.length > 0) {
-      setFormData((prev) => ({ ...prev, serviceId: services[0]._id }));
-    }
-  }, [services, formData.serviceId]);
-
-  // Dynamic template for currently selected service
-  const { data: activeTemplate } = useQuery({
-    queryKey: ["service-template", formData.serviceId],
-    queryFn: () => (formData.serviceId ? getPublicServiceTemplate(formData.serviceId) : null),
-    enabled: Boolean(formData.serviceId),
-  });
-
-  // Handle Input Changes
-  const updateField = (key: string, value: any) => {
-    setFormData((prev) => ({ ...prev, [key]: value }));
-  };
-
-  const updateRequirement = (reqKey: string, value: any) => {
-    setFormData((prev) => ({
-      ...prev,
-      requirements: { ...prev.requirements, [reqKey]: value },
-    }));
-  };
-
-  const addCoAuthor = () => {
-    setFormData((prev) => ({
-      ...prev,
-      coAuthors: [...prev.coAuthors, { name: "", designation: "", orcidId: "" }],
-    }));
-  };
-
-  const removeCoAuthor = (index: number) => {
-    setFormData((prev) => ({
-      ...prev,
-      coAuthors: prev.coAuthors.filter((_, i) => i !== index),
-    }));
-  };
-
-  const updateCoAuthor = (index: number, field: "name" | "designation" | "orcidId", value: string) => {
-    setFormData((prev) => ({
-      ...prev,
-      coAuthors: prev.coAuthors.map((coAuthor, i) =>
-        i === index ? { ...coAuthor, [field]: value } : coAuthor
-      ),
-    }));
-  };
-
-  const addReferenceFile = () => {
-    if (!formData.newFileUrl.trim()) return;
-    const newFile = {
-      name: formData.newFileName.trim() || "Reference Document",
-      url: formData.newFileUrl.trim(),
-    };
-    setFormData((prev) => ({
-      ...prev,
-      referenceFiles: [...prev.referenceFiles, newFile],
-      newFileName: "",
-      newFileUrl: "",
-    }));
-  };
-
-  const removeReferenceFile = (index: number) => {
-    setFormData((prev) => ({
-      ...prev,
-      referenceFiles: prev.referenceFiles.filter((_, i) => i !== index),
-    }));
-  };
-
-  // Validation per step
-  const validateStep = (): boolean => {
-    setSubmitError(null);
-    if (currentStep === 1) {
-      if (!formData.academicLevel) {
-        setSubmitError("Please select your academic level.");
-        return false;
-      }
-      return true;
-    }
-    if (currentStep === 5) {
-      if (!formData.correspondingAuthorName.trim()) {
-        setSubmitError("Please enter the corresponding author name.");
-        return false;
-      }
-
-      if (!formData.correspondingAuthorDesignation.trim()) {
-        setSubmitError("Please enter the corresponding author designation.");
-        return false;
-      }
-
-      if (formData.coAuthors.some((coAuthor) => {
-        const hasAnyValue = coAuthor.name.trim() || coAuthor.designation.trim() || coAuthor.orcidId.trim();
-        return hasAnyValue && (!coAuthor.name.trim() || !coAuthor.designation.trim());
-      })) {
-        setSubmitError("Each co-author must include both name and designation.");
-        return false;
-      }
-
-      if (!formData.supervisorName.trim()) {
-        setSubmitError("Please enter the supervisor name.");
-        return false;
-      }
-
-      if (!formData.supervisorDesignation.trim()) {
-        setSubmitError("Please enter the supervisor designation.");
-        return false;
-      }
-
-      return true;
-    }
-    if (currentStep === 2) {
-      if (!formData.serviceId) {
-        setSubmitError("Please select a research service.");
-        return false;
-      }
-      return true;
-    }
-    if (currentStep === 3) {
-      // Validate required dynamic fields if template exists
-      if (activeTemplate?.fields) {
-        for (const f of activeTemplate.fields) {
-          if (f.isRequired) {
-            const val = formData.requirements[f.key];
-            if (val === undefined || val === null || val === "") {
-              setSubmitError(`Please complete required field: "${f.label}"`);
-              return false;
-            }
-          }
-        }
-      }
-      return true;
-    }
-    if (currentStep === 6) {
-      if (!formData.customerName.trim()) {
-        setSubmitError("Please provide your name.");
-        return false;
-      }
-      if (!formData.customerEmail.trim()) {
-        setSubmitError("Please provide a valid email address.");
-        return false;
-      }
-      return true;
-    }
-    return true;
-  };
-
-  const handleNext = () => {
-    if (validateStep()) {
-      setCurrentStep((prev) => Math.min(6, prev + 1));
-      window.scrollTo({ top: 0, behavior: "smooth" });
-    }
-  };
-
-  const handlePrev = () => {
-    setCurrentStep((prev) => Math.max(1, prev - 1));
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  };
-
-  // Submit Handler
-  const handleSubmit = async () => {
-    if (!validateStep()) return;
-
-    if (!isAuthenticated) {
-      // Prompt customer to register or log in first
-      setSubmitError("Please sign in or register to track your submitted requests.");
-      navigate("login", { redirect: "wizard" });
-      return;
-    }
-
-    setIsSubmitting(true);
-    setSubmitError(null);
-
     try {
-      const payload = {
-        name: formData.customerName,
-        email: formData.customerEmail,
-        phone: formData.customerPhone,
-        whatsapp: formData.customerWhatsapp,
-        serviceId: formData.serviceId,
-        templateId: activeTemplate?._id,
-        academicProfile: {
-          academicLevel: formData.academicLevel,
-          discipline: formData.discipline,
-          university: formData.university,
-          department: formData.department,
-          correspondingAuthor: {
-            name: formData.correspondingAuthorName.trim(),
-            designation: formData.correspondingAuthorDesignation.trim(),
-            orcidId: formData.correspondingAuthorOrcidId.trim() || undefined,
-          },
-          coAuthors: formData.coAuthors
-            .filter((coAuthor) => coAuthor.name.trim() || coAuthor.designation.trim() || coAuthor.orcidId.trim())
-            .map((coAuthor) => ({
-              name: coAuthor.name.trim(),
-              designation: coAuthor.designation.trim(),
-              orcidId: coAuthor.orcidId.trim() || undefined,
-            })),
-          supervisor: {
-            name: formData.supervisorName.trim(),
-            designation: formData.supervisorDesignation.trim(),
-            orcidId: formData.supervisorOrcidId.trim() || undefined,
-          },
-          publicationType: formData.publicationType,
-          targetJournal: formData.targetJournal,
-          targetConference: formData.targetConference,
-          indexingRequirement: formData.indexingRequirement,
-          citationStyle: formData.citationStyle,
-          wordCount: Number(formData.wordCount) || 6000,
-          deadline: formData.deadline,
-        },
-        requirements: formData.requirements,
-        referenceFiles: formData.referenceFiles,
-        additionalMessage: formData.additionalMessage,
-        preferredContactMethod: formData.preferredContactMethod,
+      sessionStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+    } catch {
+      /* ignore */
+    }
+  }, [draft]);
+
+  // Preselect the service from the URL (?service=<id or slug>)
+  useEffect(() => {
+    if (!initialService || !services.data) return;
+    const match = services.data.find((s) => s._id === initialService || s.slug === initialService);
+    if (match && match._id !== draft.serviceId) update({ serviceId: match._id, requirements: {} });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialService, services.data]);
+
+  // Prefill contact details from the signed-in profile (never overwrite typed values)
+  useEffect(() => {
+    if (!user) return;
+    setDraft((d) => ({
+      ...d,
+      name: d.name || [user.firstName, user.lastName].filter(Boolean).join(" "),
+      email: d.email || user.email || "",
+      whatsapp: d.whatsapp || user.whatsapp || user.phone || "",
+      institution: d.institution || user.institution || "",
+      department: d.department || user.department || "",
+      academicLevel: d.academicLevel || user.academicLevel || "",
+    }));
+  }, [user]);
+
+  const service: Service | undefined = services.data?.find((s) => s._id === draft.serviceId);
+  const ip = isIpService(service, domains.data);
+
+  const templateQuery = useQuery({
+    queryKey: ["service-template", draft.serviceId],
+    queryFn: () => getPublicServiceTemplate(draft.serviceId),
+    enabled: Boolean(draft.serviceId),
+    staleTime: 5 * 60 * 1000,
+  });
+  const template = templateQuery.data;
+  const fields: RequirementField[] = useMemo(
+    () => (template?.fields || []).filter((f) => f.isActive !== false).sort((a, b) => a.sortOrder - b.sortOrder),
+    [template]
+  );
+  const usesTemplate = fields.length > 0;
+
+  // Split services into the two practice areas for the guided picker
+  const serviceGroups = useMemo(() => {
+    const all = services.data || [];
+    const ipList = all.filter((s) => isIpService(s, domains.data));
+    return { research: all.filter((s) => !ipList.includes(s)), ip: ipList };
+  }, [services.data, domains.data]);
+
+  const people = ip
+    ? {
+        lead: { title: "Lead inventor", designationHint: "Select or type, e.g. Assistant Professor", options: INVENTOR_DESIGNATIONS },
+        supervisor: { title: "Applicant / assignee", designationHint: "Select or type, e.g. University", nameLabel: "Applicant name", options: APPLICANT_TYPES },
+        others: "Co-inventors",
+        otherOptions: INVENTOR_DESIGNATIONS,
+      }
+    : {
+        lead: { title: "Corresponding author", designationHint: "Select or type, e.g. Ph.D. Scholar", options: ACADEMIC_DESIGNATIONS },
+        supervisor: { title: "Supervisor / guide", designationHint: "Select or type, e.g. Professor", nameLabel: "Full name", options: ACADEMIC_DESIGNATIONS },
+        others: "Co-authors",
+        otherOptions: ACADEMIC_DESIGNATIONS,
       };
 
-      const res = await submitServiceRequest(payload);
-      setSubmittedRequest(res);
-    } catch (err: any) {
-      setSubmitError(
-        err.response?.data?.message || err.message || "Failed to submit request. Please try again."
-      );
+  /* ------------------------------ validation ------------------------------ */
+
+  const validateStep1 = () => {
+    const e: Record<string, string> = {};
+    if (!draft.serviceId) e.serviceId = "Please choose a service.";
+    if (usesTemplate) {
+      fields.forEach((f) => {
+        if (f.isRequired && isEmpty(draft.requirements[f.key])) e[`req.${f.key}`] = "This field is required.";
+        const v = draft.requirements[f.key];
+        if (f.type === "EMAIL" && typeof v === "string" && v && !EMAIL_RE.test(v)) e[`req.${f.key}`] = "Enter a valid email address.";
+      });
+    } else if (draft.serviceId) {
+      if (!draft.topic.trim()) e.topic = "Please give your project a title or topic.";
+      if (draft.brief.trim().length < 20) e.brief = "Please describe what you need in a sentence or two (at least 20 characters).";
+    }
+    return e;
+  };
+
+  const validateStep2 = () => {
+    const e: Record<string, string> = {};
+    if (!draft.name.trim()) e.name = "Please enter your name.";
+    if (!EMAIL_RE.test(draft.email.trim())) e.email = "Enter a valid email address.";
+    if (draft.whatsapp.replace(/\D/g, "").length < 8) e.whatsapp = "Enter a valid WhatsApp / phone number with country code.";
+    if (!draft.lead.name.trim()) e["lead.name"] = "Required.";
+    if (!draft.lead.designation.trim()) e["lead.designation"] = "Required.";
+    if (!draft.supervisor.name.trim()) e["supervisor.name"] = "Required.";
+    if (!draft.supervisor.designation.trim()) e["supervisor.designation"] = "Required.";
+    draft.others.forEach((p, i) => {
+      if ((p.name.trim() || p.designation.trim()) && (!p.name.trim() || !p.designation.trim())) {
+        e[`others.${i}`] = "Add both a name and a designation, or remove this row.";
+      }
+    });
+    if (!draft.consent) e.consent = "Please accept the terms to continue.";
+    return e;
+  };
+
+  const focusFirstError = (e: Record<string, string>) => {
+    setErrors(e);
+    const first = Object.keys(e)[0];
+    if (!first) return;
+    window.setTimeout(() => {
+      const el = document.querySelector<HTMLElement>(`[data-field="${first}"]`);
+      el?.scrollIntoView({ behavior: "smooth", block: "center" });
+      el?.querySelector<HTMLElement>("input,select,textarea,button")?.focus({ preventScroll: true });
+    }, 50);
+  };
+
+  const goNext = () => {
+    const e = validateStep1();
+    if (Object.keys(e).length) return focusFirstError(e);
+    setErrors({});
+    setStep(2);
+    formTop.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  const goBack = () => {
+    setStep(1);
+    setErrors({});
+    formTop.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  /* -------------------------------- submit -------------------------------- */
+
+  const handleSubmit = async (ev: React.FormEvent) => {
+    ev.preventDefault();
+    const e1 = validateStep1();
+    if (Object.keys(e1).length) {
+      setStep(1);
+      return focusFirstError(e1);
+    }
+    const e2 = validateStep2();
+    if (Object.keys(e2).length) return focusFirstError(e2);
+    if (!isAuthenticated) return;
+
+    setSubmitting(true);
+    setSubmitError(null);
+    const person = (p: Person) => ({ name: p.name.trim(), designation: p.designation.trim(), email: p.email.trim() || undefined });
+
+    const requirements: Record<string, unknown> = usesTemplate
+      ? { ...draft.requirements }
+      : { topic: draft.topic.trim(), project_brief: draft.brief.trim() };
+
+    try {
+      const result = await submitServiceRequest({
+        serviceId: draft.serviceId,
+        templateId: template?._id,
+        name: draft.name.trim(),
+        email: draft.email.trim(),
+        whatsapp: draft.whatsapp.trim(),
+        phone: draft.whatsapp.trim(),
+        preferredContactMethod: draft.contactMethod,
+        requirements,
+        referenceFiles: draft.files,
+        additionalMessage: draft.notes.trim() || undefined,
+        academicProfile: {
+          academicLevel: draft.academicLevel || undefined,
+          university: draft.institution.trim() || undefined,
+          department: draft.department.trim() || undefined,
+          deadline: draft.deadline || undefined,
+          publicationType: ip ? "Patent / IP" : draft.publicationType || undefined,
+          targetJournal: ip ? undefined : draft.targetJournal.trim() || undefined,
+          indexingRequirement: ip ? undefined : draft.indexingRequirement || undefined,
+          citationStyle: ip ? undefined : draft.citationStyle || undefined,
+          correspondingAuthor: person(draft.lead),
+          supervisor: person(draft.supervisor),
+          coAuthors: draft.others.filter((p) => p.name.trim()).map(person),
+        },
+      });
+      setSubmitted(result);
+      sessionStorage.removeItem(DRAFT_KEY);
+      queryClient.invalidateQueries({ queryKey: ["customer-requests"] });
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch (err) {
+      setSubmitError(getErrorMessage(err, "We couldn't submit your request. Please try again."));
     } finally {
-      setIsSubmitting(false);
+      setSubmitting(false);
     }
   };
 
-  const selectedServiceObj = services.find((s) => s._id === formData.serviceId);
+  /* ------------------------------- rendering ------------------------------- */
 
-  // Success Confirmation Screen
-  if (submittedRequest) {
+  if (submitted) {
     return (
-      <div className="max-w-2xl mx-auto px-4 py-16 text-center space-y-6">
-        <div className="w-16 h-16 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center mx-auto shadow-xl shadow-emerald-950/50">
-          <CheckCircle2 className="w-8 h-8" />
-        </div>
+      <SubmittedView
+        request={submitted}
+        navigate={navigate}
+        onAnother={() => {
+          setDraft({ ...EMPTY_DRAFT, name: draft.name, email: draft.email, whatsapp: draft.whatsapp, institution: draft.institution, department: draft.department, academicLevel: draft.academicLevel });
+          setSubmitted(null);
+          setStep(1);
+        }}
+      />
+    );
+  }
 
-        <div className="space-y-2">
-          <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
-            Submission Confirmed
-          </span>
-          <h2 className="text-2xl sm:text-3xl font-extrabold text-white">
-            Research Request Received!
-          </h2>
-          <p className="text-sm text-slate-300 max-w-md mx-auto leading-relaxed">
-            Your request has been saved directly to MongoDB. Our academic team is reviewing your requirements.
-          </p>
-        </div>
-
-        {/* Request Number Badge */}
-        <div className="glass-panel p-5 rounded-2xl border-indigo-500/30 max-w-md mx-auto space-y-2">
-          <p className="text-xs text-slate-400">Your Unique Tracking Reference:</p>
-          <div className="text-2xl font-black text-indigo-300 font-mono select-all">
-            {submittedRequest.requestNumber}
-          </div>
-          <p className="text-[11px] text-slate-400">
-            Status: <span className="text-sky-400 font-semibold">{submittedRequest.status}</span>
-          </p>
-        </div>
-
-        {/* WhatsApp Collaboration CTA */}
-        <div className="p-6 rounded-2xl bg-emerald-950/20 border border-emerald-500/30 max-w-md mx-auto text-left space-y-3">
-          <div className="flex items-center gap-2 text-emerald-300 font-bold text-sm">
-            <MessageSquare className="w-4 h-4" />
-            <span>Connect on WhatsApp</span>
-          </div>
-          <p className="text-xs text-slate-300 leading-relaxed">
-            Discuss your scope, quotation, and turnaround directly with our academic coordinator. Click below to launch chat with pre-filled request details:
-          </p>
-          <WhatsAppButton
-            requestNumber={submittedRequest.requestNumber}
-            serviceName={selectedServiceObj?.name || "Academic Service"}
-            size="md"
-            className="w-full"
-            label="Chat on WhatsApp with Request Details"
-          />
-        </div>
-
-        {/* Secondary Actions */}
-        <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
-          <button
-            onClick={() => navigate("customer-dashboard")}
-            className="px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold"
-          >
-            Go to My Requests Dashboard
-          </button>
-          <button
-            onClick={() => {
-              setSubmittedRequest(null);
-              setCurrentStep(1);
-            }}
-            className="px-5 py-2.5 rounded-xl bg-transparent border border-slate-700 hover:bg-slate-900 text-slate-300 text-xs font-semibold"
-          >
-            Submit Another Request
-          </button>
-        </div>
+  if (services.isLoading) return <PageLoader label="Preparing the form…" />;
+  if (services.isError) {
+    return (
+      <div className="container-page section max-w-xl">
+        <ErrorState onRetry={() => services.refetch()} />
       </div>
     );
   }
 
+  const err = (k: string) => errors[k];
+  const inputCls = (k: string) => `input ${err(k) ? "input-error" : ""}`;
+
   return (
-    <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 pt-4 sm:pt-6 pb-12 space-y-6 min-w-0">
-      {/* Header */}
-      <div className="space-y-2 text-center max-w-xl mx-auto">
-        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-500/10 text-indigo-400 text-xs font-semibold border border-indigo-500/20">
-          <Sparkles className="w-3.5 h-3.5" />
-          <span>Multi-Step Dynamic Wizard</span>
+    <div className="bg-slate-50">
+      <div className="border-b border-slate-200 bg-white">
+        <div className="container-page py-8 sm:py-10" ref={formTop}>
+          <p className="eyebrow">New request</p>
+          <h1 className="mt-2 font-serif text-3xl font-semibold tracking-tight text-navy-900 sm:text-4xl">Start a request</h1>
+          <p className="mt-2 text-slate-600">Two short steps. You'll receive a written quotation before any work begins.</p>
+          <Stepper step={step} />
         </div>
-        <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-          Submit Research Requirements
-        </h1>
-        <p className="text-xs sm:text-sm text-slate-400">
-          Tailored form driven by backend requirement templates. No online payment required.
-        </p>
       </div>
 
-      {/* Stepper Indicator */}
-      <div className="glass-panel p-3 sm:p-4 rounded-2xl border-slate-800">
-        <div className="flex items-stretch gap-1.5 overflow-x-auto pb-1 sm:pb-0">
-          {[
-            { step: 1, label: "Profile" },
-            { step: 2, label: "Service" },
-            { step: 3, label: "Requirements" },
-            { step: 4, label: "Files" },
-            { step: 5, label: "Authors" },
-            { step: 6, label: "Review" },
-          ].map((item) => {
-            const isCompleted = currentStep > item.step;
-            const isCurrent = currentStep === item.step;
-            return (
-              <div
-                key={item.step}
-                className={`shrink-0 flex-1 min-w-[70px] py-2 px-1.5 rounded-xl transition-all text-center text-xs ${
-                  isCurrent
-                    ? "bg-indigo-600/30 text-indigo-300 border border-indigo-500/40 font-bold"
-                    : isCompleted
-                    ? "text-emerald-400 font-semibold"
-                    : "text-slate-500 font-medium"
-                }`}
-              >
-                <div className="flex items-center justify-center gap-1">
-                  <span>{isCompleted ? "✓" : `0${item.step}`}</span>
-                  <span className="hidden sm:inline">{item.label}</span>
+      <form onSubmit={handleSubmit} noValidate className="container-page grid gap-8 py-8 lg:grid-cols-[1fr_20rem] lg:py-10">
+        <div className="space-y-6">
+          {step === 1 ? (
+            <>
+              <section className="card card-pad space-y-6" aria-labelledby="sec-service">
+                <h2 id="sec-service" className="h-card">
+                  What do you need?
+                </h2>
+                <div data-field="serviceId">
+                  <ServicePicker
+                    research={serviceGroups.research}
+                    ip={serviceGroups.ip}
+                    value={draft.serviceId}
+                    error={err("serviceId")}
+                    onChange={(serviceId) => update({ serviceId, requirements: {} })}
+                  />
                 </div>
-                <span className="sm:hidden block text-[10px] mt-0.5">{item.label}</span>
-              </div>
-            );
-          })}
-        </div>
-      </div>
 
-      {/* Error Alert */}
-      {submitError && (
-        <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-start gap-2.5">
-          <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-          <span>{submitError}</span>
-        </div>
-      )}
-
-      {/* STEP FORMS CONTAINER */}
-      <div className="glass-panel p-6 sm:p-8 rounded-3xl border-slate-800 space-y-6">
-        {/* ========================================================================= */}
-        {/* STEP 1: ACADEMIC PROFILE                                                  */}
-        {/* ========================================================================= */}
-        {currentStep === 1 && (
-          <div className="space-y-6 animate-fade-in">
-            <div className="border-b border-slate-800 pb-3">
-              <h3 className="text-base font-bold text-white">Step 1: Academic Profile & Level</h3>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Tell us about your educational stage and research affiliation.
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  Academic Level / Degree *
-                </label>
-                <select
-                  value={formData.academicLevel}
-                  onChange={(e) => updateField("academicLevel", e.target.value)}
-                  className="w-full p-3 rounded-xl glass-input text-xs text-white bg-slate-900"
-                >
-                  <option value="">Select academic level...</option>
-                  {refData?.academic_levels?.map((lvl) => (
-                    <option key={lvl.id} value={lvl.label}>
-                      {lvl.label}
-                    </option>
-                  )) || (
-                    <>
-                      <option value="Bachelor's Degree">Bachelor's Degree</option>
-                      <option value="Master's Degree">Master's Degree</option>
-                      <option value="Ph.D. / Doctoral Candidate">Ph.D. / Doctoral Candidate</option>
-                      <option value="Postdoctoral Researcher">Postdoctoral Researcher</option>
-                      <option value="University Faculty">University Faculty</option>
-                    </>
-                  )}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  Research Discipline / Field
-                </label>
-                <select
-                  value={formData.discipline}
-                  onChange={(e) => updateField("discipline", e.target.value)}
-                  className="w-full p-3 rounded-xl glass-input text-xs text-white bg-slate-900"
-                >
-                  <option value="">Select discipline...</option>
-                  {domains.map((d) => (
-                    <option key={d._id} value={d.name}>
-                      {d.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  University / Institute Name
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g., Stanford University / IIT Delhi"
-                  value={formData.university}
-                  onChange={(e) => updateField("university", e.target.value)}
-                  className="w-full p-3 rounded-xl glass-input text-xs text-white placeholder-slate-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  Department / School
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g., Dept of Computer Science & Engineering"
-                  value={formData.department}
-                  onChange={(e) => updateField("department", e.target.value)}
-                  className="w-full p-3 rounded-xl glass-input text-xs text-white placeholder-slate-500"
-                />
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ========================================================================= */}
-        {/* STEP 2: SERVICE & PUBLICATION SCOPE                                       */}
-        {/* ========================================================================= */}
-        {currentStep === 2 && (
-          <div className="space-y-6 animate-fade-in">
-            <div className="border-b border-slate-800 pb-3">
-              <h3 className="text-base font-bold text-white">Step 2: Service & Target Publication</h3>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Select the specific advisory service and your publishing targets.
-              </p>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  Select Research Service *
-                </label>
-                <select
-                  value={formData.serviceId}
-                  onChange={(e) => updateField("serviceId", e.target.value)}
-                  className="w-full p-3 rounded-xl glass-input text-xs text-white bg-slate-900"
-                >
-                  {services.map((s) => (
-                    <option key={s._id} value={s._id}>
-                      {s.name} ({s.turnaroundTime || "7–14 Days"})
-                    </option>
-                  ))}
-                </select>
-                {selectedServiceObj && (
-                  <p className="text-xs text-indigo-300/80 mt-1.5">
-                    {selectedServiceObj.shortDescription}
-                  </p>
+                {draft.serviceId && (
+                  <div className="divider pt-6">
+                    <h3 className="text-base font-semibold text-navy-900">3. Tell us about your project</h3>
+                    <p className="muted mt-1">A few quick questions so our specialists can prepare an accurate quotation.</p>
+                  </div>
                 )}
-              </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                    Publication / Project Type
-                  </label>
-                  <select
-                    value={formData.publicationType}
-                    onChange={(e) => updateField("publicationType", e.target.value)}
-                    className="w-full p-3 rounded-xl glass-input text-xs text-white bg-slate-900"
-                  >
-                    {refData?.publication_types?.map((pt) => (
-                      <option key={pt.id} value={pt.label}>
-                        {pt.label}
-                      </option>
-                    )) || (
-                      <>
-                        <option value="Original Journal Article">Original Journal Article</option>
-                        <option value="Ph.D. Thesis / Dissertation">Ph.D. Thesis / Dissertation</option>
-                        <option value="Systematic Review & Meta-Analysis">Systematic Review & Meta-Analysis</option>
-                        <option value="Conference Proceeding Paper">Conference Proceeding Paper</option>
-                      </>
-                    )}
-                  </select>
-                </div>
+                {draft.serviceId && templateQuery.isLoading && (
+                  <div className="flex items-center gap-2 text-sm text-slate-500">
+                    <Spinner /> Loading questions for this service…
+                  </div>
+                )}
 
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                    Target Indexing Requirement
-                  </label>
-                  <select
-                    value={formData.indexingRequirement}
-                    onChange={(e) => updateField("indexingRequirement", e.target.value)}
-                    className="w-full p-3 rounded-xl glass-input text-xs text-white bg-slate-900"
-                  >
-                    {refData?.indexing_targets?.map((idx) => (
-                      <option key={idx.id} value={idx.label}>
-                        {idx.label}
-                      </option>
-                    )) || (
-                      <>
-                        <option value="Scopus">Scopus</option>
-                        <option value="Web of Science (SCI / SCIE)">Web of Science (SCI / SCIE)</option>
-                        <option value="IEEE Xplore">IEEE Xplore</option>
-                        <option value="PubMed / MEDLINE">PubMed / MEDLINE</option>
-                        <option value="UGC-CARE">UGC-CARE</option>
-                      </>
-                    )}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                    Target Journal / Conference Name (Optional)
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g., IEEE TPAMI, Elsevier Neural Networks..."
-                    value={formData.targetJournal}
-                    onChange={(e) => updateField("targetJournal", e.target.value)}
-                    className="w-full p-3 rounded-xl glass-input text-xs text-white placeholder-slate-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                    Citation & Referencing Style
-                  </label>
-                  <select
-                    value={formData.citationStyle}
-                    onChange={(e) => updateField("citationStyle", e.target.value)}
-                    className="w-full p-3 rounded-xl glass-input text-xs text-white bg-slate-900"
-                  >
-                    {refData?.citation_styles?.map((cs) => (
-                      <option key={cs.id} value={cs.label}>
-                        {cs.label}
-                      </option>
-                    )) || (
-                      <>
-                        <option value="IEEE Style">IEEE Style</option>
-                        <option value="APA 7th Edition">APA 7th Edition</option>
-                        <option value="Harvard Style">Harvard Style</option>
-                        <option value="Vancouver Style">Vancouver Style</option>
-                      </>
-                    )}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                    Estimated Target Word Count
-                  </label>
-                  <input
-                    type="number"
-                    value={formData.wordCount}
-                    onChange={(e) => updateField("wordCount", Number(e.target.value))}
-                    className="w-full p-3 rounded-xl glass-input text-xs text-white"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                    Target Submission Deadline
-                  </label>
-                  <input
-                    type="date"
-                    value={formData.deadline}
-                    onChange={(e) => updateField("deadline", e.target.value)}
-                    className="w-full p-3 rounded-xl glass-input text-xs text-white bg-slate-900"
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ========================================================================= */}
-        {/* STEP 3: DYNAMIC REQUIREMENTS (FROM BACKEND TEMPLATE)                     */}
-        {/* ========================================================================= */}
-        {currentStep === 3 && (
-          <div className="space-y-6 animate-fade-in">
-            <div className="border-b border-slate-800 pb-3">
-              <div className="flex items-center gap-2">
-                <h3 className="text-base font-bold text-white">Step 3: Research Specifications</h3>
-                <span className="px-2 py-0.5 text-[10px] font-bold rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                  DYNAMIC
-                </span>
-              </div>
-              <p className="text-xs text-slate-400 mt-0.5">
-                {activeTemplate
-                  ? `Configured parameters for "${selectedServiceObj?.name}" template.`
-                  : "Specify your research topic, methodology, and objectives."}
-              </p>
-            </div>
-
-            {/* If template has dynamic fields, render each dynamically */}
-            {activeTemplate?.fields && activeTemplate.fields.length > 0 ? (
-              <div className="space-y-4">
-                {activeTemplate.fields.map((field: RequirementField) => {
-                  const val = formData.requirements[field.key] || "";
-                  return (
-                    <div key={field._id} className="space-y-1.5">
-                      <label className="block text-xs font-semibold text-slate-200">
-                        {field.label} {field.isRequired && <span className="text-rose-400">*</span>}
-                      </label>
-                      {field.description && (
-                        <p className="text-[11px] text-slate-400">{field.description}</p>
-                      )}
-
-                      {/* TEXT */}
-                      {field.type === "TEXT" && (
-                        <input
-                          type="text"
-                          placeholder={field.placeholder || "Enter details..."}
-                          value={val}
-                          onChange={(e) => updateRequirement(field.key, e.target.value)}
-                          className="w-full p-3 rounded-xl glass-input text-xs text-white"
-                        />
-                      )}
-
-                      {/* LONG_TEXT */}
-                      {field.type === "LONG_TEXT" && (
-                        <textarea
-                          rows={3}
-                          placeholder={field.placeholder || "Provide details..."}
-                          value={val}
-                          onChange={(e) => updateRequirement(field.key, e.target.value)}
-                          className="w-full p-3 rounded-xl glass-input text-xs text-white"
-                        />
-                      )}
-
-                      {/* NUMBER */}
-                      {field.type === "NUMBER" && (
-                        <input
-                          type="number"
-                          placeholder={field.placeholder || "0"}
-                          value={val}
-                          onChange={(e) => updateRequirement(field.key, e.target.value)}
-                          className="w-full p-3 rounded-xl glass-input text-xs text-white"
-                        />
-                      )}
-
-                      {/* DATE */}
-                      {field.type === "DATE" && (
-                        <input
-                          type="date"
-                          value={val}
-                          onChange={(e) => updateRequirement(field.key, e.target.value)}
-                          className="w-full p-3 rounded-xl glass-input text-xs text-white bg-slate-900"
-                        />
-                      )}
-
-                      {/* SELECT */}
-                      {field.type === "SELECT" && (
-                        <select
-                          value={val}
-                          onChange={(e) => updateRequirement(field.key, e.target.value)}
-                          className="w-full p-3 rounded-xl glass-input text-xs text-white bg-slate-900"
-                        >
-                          <option value="">Select option...</option>
-                          {field.options?.map((opt, i) => (
-                            <option key={i} value={opt.value}>
-                              {opt.label}
-                            </option>
-                          ))}
-                        </select>
-                      )}
-
-                      {/* RADIO */}
-                      {field.type === "RADIO" && (
-                        <div className="space-y-2 pt-1">
-                          {field.options?.map((opt, i) => (
-                            <label
-                              key={i}
-                              className={`flex items-center gap-2.5 p-2.5 rounded-xl border text-xs cursor-pointer transition-colors ${
-                                val === opt.value
-                                  ? "bg-indigo-600/20 border-indigo-500/40 text-white"
-                                  : "border-slate-800 text-slate-400 hover:bg-slate-900"
-                              }`}
-                            >
-                              <input
-                                type="radio"
-                                name={field.key}
-                                value={opt.value}
-                                checked={val === opt.value}
-                                onChange={() => updateRequirement(field.key, opt.value)}
-                                className="text-indigo-600 focus:ring-indigo-500"
-                              />
-                              <span>{opt.label}</span>
-                            </label>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              /* Universal fallback fields when no dynamic template is configured */
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                    Proposed Research Topic / Working Title *
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g., Deep Reinforcement Learning for Adaptive UAV Trajectory Planning"
-                    value={formData.requirements.topic || ""}
-                    onChange={(e) => updateRequirement("topic", e.target.value)}
-                    className="w-full p-3 rounded-xl glass-input text-xs text-white"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                    Core Objectives & Research Questions
-                  </label>
-                  <textarea
-                    rows={3}
-                    placeholder="List your primary objectives, hypothesis, or research gaps to solve..."
-                    value={formData.requirements.objectives || ""}
-                    onChange={(e) => updateRequirement("objectives", e.target.value)}
-                    className="w-full p-3 rounded-xl glass-input text-xs text-white"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                    Preferred Methodology, Framework or Tool
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g., PyTorch, MATLAB Simulink, PRISMA, SmartPLS, Qualtrics..."
-                    value={formData.requirements.methodology || ""}
-                    onChange={(e) => updateRequirement("methodology", e.target.value)}
-                    className="w-full p-3 rounded-xl glass-input text-xs text-white"
-                  />
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ========================================================================= */}
-        {/* STEP 4: GUIDELINES & ATTACHMENTS                                          */}
-        {/* ========================================================================= */}
-        {currentStep === 4 && (
-          <div className="space-y-6 animate-fade-in">
-            <div className="border-b border-slate-800 pb-3">
-              <h3 className="text-base font-bold text-white">Step 4: Reference Files & Guidelines</h3>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Attach reference paper links, university author guidelines, or existing drafts.
-              </p>
-            </div>
-
-            {/* Reference Files List */}
-            <div className="space-y-3">
-              <label className="block text-xs font-semibold text-slate-300">
-                Attached Reference Files & Links
-              </label>
-
-              {formData.referenceFiles.length > 0 ? (
-                <div className="space-y-2">
-                  {formData.referenceFiles.map((f, i) => (
-                    <div
-                      key={i}
-                      className="flex items-center justify-between p-3 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-300"
-                    >
-                      <div className="flex items-center gap-2 overflow-hidden">
-                        <Paperclip className="w-4 h-4 text-indigo-400 shrink-0" />
-                        <span className="font-medium truncate">{f.name}</span>
-                        <span className="text-slate-500 truncate">({f.url})</span>
+                {draft.serviceId && !templateQuery.isLoading && (
+                  <>
+                    {usesTemplate ? (
+                      <div className="grid gap-5 sm:grid-cols-2">
+                        {fields.map((f) => (
+                          <DynamicField
+                            key={f._id || f.key}
+                            field={f}
+                            value={draft.requirements[f.key]}
+                            error={err(`req.${f.key}`)}
+                            canUpload={isAuthenticated}
+                            onChange={(v) => setDraft((d) => ({ ...d, requirements: { ...d.requirements, [f.key]: v } }))}
+                          />
+                        ))}
                       </div>
-                      <button
-                        onClick={() => removeReferenceFile(i)}
-                        className="text-rose-400 hover:text-rose-300 font-semibold px-2 py-0.5"
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-xs text-slate-500 italic">No reference links attached yet.</p>
-              )}
+                    ) : (
+                      <div className="grid gap-5">
+                        <div data-field="topic">
+                          <Field label={ip ? "Title of the invention / work" : "Project title or topic"} required error={err("topic")}>
+                            {(id, d) => (
+                              <input
+                                id={id}
+                                aria-describedby={d}
+                                className={inputCls("topic")}
+                                value={draft.topic}
+                                onChange={(e) => update({ topic: e.target.value })}
+                                placeholder={ip ? "e.g. Low-cost water purification cartridge" : "e.g. Deep learning for early crop disease detection"}
+                              />
+                            )}
+                          </Field>
+                        </div>
+                        <div data-field="brief">
+                          <Field
+                            label="Describe what you need"
+                            required
+                            error={err("brief")}
+                            help="Scope, current stage, and anything we should know. You can add detail later."
+                          >
+                            {(id, d) => (
+                              <textarea
+                                id={id}
+                                aria-describedby={d}
+                                rows={5}
+                                className={inputCls("brief")}
+                                value={draft.brief}
+                                onChange={(e) => update({ brief: e.target.value })}
+                              />
+                            )}
+                          </Field>
+                        </div>
+                      </div>
+                    )}
 
-              {/* Add file inline form */}
-              <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-3">
-                <p className="text-xs font-semibold text-slate-300">Add Document or Cloud Link</p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <input
-                    type="text"
-                    placeholder="File description (e.g., University Thesis Guidelines)"
-                    value={formData.newFileName}
-                    onChange={(e) => updateField("newFileName", e.target.value)}
-                    className="w-full p-2.5 rounded-xl glass-input text-xs text-white"
-                  />
-                  <input
-                    type="url"
-                    placeholder="URL (Google Drive, Dropbox, arXiv link...)"
-                    value={formData.newFileUrl}
-                    onChange={(e) => updateField("newFileUrl", e.target.value)}
-                    className="w-full p-2.5 rounded-xl glass-input text-xs text-white"
-                  />
+                    <div className="grid gap-5 sm:grid-cols-2">
+                      <Field label="Target date" help="Optional. Tell us if you are working to a deadline.">
+                        {(id, d) => (
+                          <input
+                            id={id}
+                            aria-describedby={d}
+                            type="date"
+                            className="input"
+                            min={new Date().toISOString().slice(0, 10)}
+                            value={draft.deadline}
+                            onChange={(e) => update({ deadline: e.target.value })}
+                          />
+                        )}
+                      </Field>
+                    </div>
+
+                    {!ip && (
+                      <div className="rounded-md border border-slate-200">
+                        <button
+                          type="button"
+                          onClick={() => setShowPrefs((s) => !s)}
+                          aria-expanded={showPrefs}
+                          className="flex w-full items-center justify-between px-4 py-3 text-left text-sm font-medium text-navy-900"
+                        >
+                          Publication preferences <span className="font-normal text-slate-500">(optional)</span>
+                          <ChevronDown className={`ml-auto h-4 w-4 text-slate-400 transition-transform ${showPrefs ? "rotate-180" : ""}`} />
+                        </button>
+                        {showPrefs && (
+                          <div className="grid gap-5 border-t border-slate-200 p-4 sm:grid-cols-2">
+                            <RefSelect label="Publication type" items={refData.data?.publication_types} value={draft.publicationType} onChange={(v) => update({ publicationType: v })} />
+                            <RefSelect label="Indexing target" items={refData.data?.indexing_targets} value={draft.indexingRequirement} onChange={(v) => update({ indexingRequirement: v })} />
+                            <RefSelect label="Citation style" items={refData.data?.citation_styles} value={draft.citationStyle} onChange={(v) => update({ citationStyle: v })} />
+                            <Field label="Target journal or conference">
+                              {(id) => <input id={id} className="input" value={draft.targetJournal} onChange={(e) => update({ targetJournal: e.target.value })} />}
+                            </Field>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )}
+              </section>
+
+              <section className="card card-pad space-y-5" aria-labelledby="sec-files">
+                <div>
+                  <h2 id="sec-files" className="h-card">
+                    Supporting files <span className="text-sm font-normal text-slate-500">(optional)</span>
+                  </h2>
+                  <p className="muted mt-1">
+                    {ip
+                      ? "Sketches, draft specifications, examination reports or prior documents."
+                      : "Drafts, data, guidelines from your institution or target journal."}
+                  </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={addReferenceFile}
-                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-semibold"
-                >
-                  + Add Reference Link
+                <Attachments files={draft.files} canUpload={isAuthenticated} onChange={(files) => update({ files })} navigate={navigate} />
+                <Field label="Anything else we should know?">
+                  {(id) => <textarea id={id} rows={3} className="input" value={draft.notes} onChange={(e) => update({ notes: e.target.value })} />}
+                </Field>
+              </section>
+
+              <div className="flex justify-end">
+                <button type="button" onClick={goNext} className="btn-primary btn-lg w-full sm:w-auto">
+                  Continue to your details <ArrowRight className="h-4 w-4" />
                 </button>
               </div>
-            </div>
-
-            {/* Special Instructions */}
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                Special Institutional Guidelines or Directives
-              </label>
-              <textarea
-                rows={3}
-                placeholder="Mention any specific formatting requirements, professor feedback, or non-negotiable parameters..."
-                value={formData.additionalMessage}
-                onChange={(e) => updateField("additionalMessage", e.target.value)}
-                className="w-full p-3 rounded-xl glass-input text-xs text-white"
-              />
-            </div>
-          </div>
-        )}
-
-        {/* ========================================================================= */}
-        {/* STEP 5: AUTHOR & SUPERVISOR DETAILS                                      */}
-        {/* ========================================================================= */}
-        {currentStep === 5 && (
-          <div className="space-y-6 animate-fade-in">
-            <div className="border-b border-slate-800 pb-3">
-              <h3 className="text-base font-bold text-white">Step 5: Author & Supervisor Details</h3>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Add the corresponding author, co-authors, and supervisor details before final submission.
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  Corresponding Author Name *
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g., Asha Kumar"
-                  value={formData.correspondingAuthorName}
-                  onChange={(e) => updateField("correspondingAuthorName", e.target.value)}
-                  className="w-full p-3 rounded-xl glass-input text-xs text-white placeholder-slate-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  Corresponding Author Designation *
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g., Lead Author / Research Scholar"
-                  value={formData.correspondingAuthorDesignation}
-                  onChange={(e) => updateField("correspondingAuthorDesignation", e.target.value)}
-                  className="w-full p-3 rounded-xl glass-input text-xs text-white placeholder-slate-500"
-                />
-              </div>
-
-              <div className="sm:col-span-2">
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  Corresponding Author ORCID ID (optional)
-                </label>
-                <input
-                  type="text"
-                  placeholder="https://orcid.org/0000-0000-0000-0000"
-                  value={formData.correspondingAuthorOrcidId}
-                  onChange={(e) => updateField("correspondingAuthorOrcidId", e.target.value)}
-                  className="w-full p-3 rounded-xl glass-input text-xs text-white placeholder-slate-500"
-                />
-              </div>
-
-              <div className="sm:col-span-2">
-                <div className="flex items-center justify-between mb-2">
-                  <label className="block text-xs font-semibold text-slate-300">
-                    Co-Authors
-                  </label>
-                  <button
-                    type="button"
-                    onClick={addCoAuthor}
-                    className="px-2.5 py-1.5 rounded-lg border border-indigo-500/40 bg-indigo-500/10 text-[10px] font-semibold text-indigo-300 hover:bg-indigo-500/20 transition-colors"
-                  >
-                    + Add Co-author
-                  </button>
-                </div>
-
-                <div className="space-y-3">
-                  {formData.coAuthors.length === 0 ? (
-                    <div className="text-[11px] text-slate-500 border border-dashed border-slate-700 rounded-xl p-3">
-                      No co-authors added yet. You can add multiple authors if needed.
+            </>
+          ) : (
+            <>
+              <section className="card card-pad space-y-5" aria-labelledby="sec-contact">
+                <h2 id="sec-contact" className="h-card">
+                  Contact details
+                </h2>
+                <div className="grid gap-5 sm:grid-cols-2">
+                  <div data-field="name">
+                    <Field label="Full name" required error={err("name")}>
+                      {(id, d) => <input id={id} aria-describedby={d} autoComplete="name" className={inputCls("name")} value={draft.name} onChange={(e) => update({ name: e.target.value })} />}
+                    </Field>
+                  </div>
+                  <div data-field="email">
+                    <Field label="Email" required error={err("email")}>
+                      {(id, d) => <input id={id} aria-describedby={d} type="email" autoComplete="email" className={inputCls("email")} value={draft.email} onChange={(e) => update({ email: e.target.value })} />}
+                    </Field>
+                  </div>
+                  <div data-field="whatsapp">
+                    <Field label="WhatsApp / phone" required error={err("whatsapp")} help="Include the country code, e.g. +91 98765 43210">
+                      {(id, d) => <input id={id} aria-describedby={d} type="tel" autoComplete="tel" className={inputCls("whatsapp")} value={draft.whatsapp} onChange={(e) => update({ whatsapp: e.target.value })} />}
+                    </Field>
+                  </div>
+                  <fieldset>
+                    <legend className="label">Preferred contact</legend>
+                    <div className="grid grid-cols-3 gap-2">
+                      {(["WHATSAPP", "EMAIL", "PHONE"] as const).map((m) => (
+                        <label key={m} className={`choice justify-center py-2.5 ${draft.contactMethod === m ? "choice-active" : ""}`}>
+                          <input type="radio" name="contactMethod" className="sr-only" checked={draft.contactMethod === m} onChange={() => update({ contactMethod: m })} />
+                          {m === "WHATSAPP" ? "WhatsApp" : m === "EMAIL" ? "Email" : "Phone"}
+                        </label>
+                      ))}
                     </div>
+                  </fieldset>
+                  <Field label={ip ? "Organisation / institution" : "University / institution"}>
+                    {(id) => <input id={id} autoComplete="organization" className="input" value={draft.institution} onChange={(e) => update({ institution: e.target.value })} />}
+                  </Field>
+                  {ip ? (
+                    <Field label="Department / team">
+                      {(id) => <input id={id} className="input" value={draft.department} onChange={(e) => update({ department: e.target.value })} />}
+                    </Field>
                   ) : (
-                    formData.coAuthors.map((coAuthor, index) => (
-                      <div key={index} className="flex flex-col gap-2 rounded-xl border border-slate-700 bg-slate-950/40 p-3">
-                        <div className="flex justify-between items-center">
-                          <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
-                            Co-author {index + 1}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => removeCoAuthor(index)}
-                            className="text-[10px] text-rose-300 hover:text-rose-200"
-                          >
-                            Remove
-                          </button>
-                        </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                          <input
-                            type="text"
-                            placeholder="Co-author name"
-                            value={coAuthor.name}
-                            onChange={(e) => updateCoAuthor(index, "name", e.target.value)}
-                            className="w-full p-2.5 rounded-lg glass-input text-xs text-white placeholder-slate-500"
-                          />
-                          <input
-                            type="text"
-                            placeholder="Designation"
-                            value={coAuthor.designation}
-                            onChange={(e) => updateCoAuthor(index, "designation", e.target.value)}
-                            className="w-full p-2.5 rounded-lg glass-input text-xs text-white placeholder-slate-500"
-                          />
-                          <input
-                            type="text"
-                            placeholder="ORCID ID (optional)"
-                            value={coAuthor.orcidId}
-                            onChange={(e) => updateCoAuthor(index, "orcidId", e.target.value)}
-                            className="sm:col-span-2 w-full p-2.5 rounded-lg glass-input text-xs text-white placeholder-slate-500"
-                          />
-                        </div>
-                      </div>
-                    ))
+                    <RefSelect label="Academic level" items={refData.data?.academic_levels} value={draft.academicLevel} onChange={(v) => update({ academicLevel: v })} />
                   )}
                 </div>
-              </div>
+              </section>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  Supervisor Name *
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g., Dr. Ananya Sen"
-                  value={formData.supervisorName}
-                  onChange={(e) => updateField("supervisorName", e.target.value)}
-                  className="w-full p-3 rounded-xl glass-input text-xs text-white placeholder-slate-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  Supervisor Designation *
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g., Professor / Supervisor"
-                  value={formData.supervisorDesignation}
-                  onChange={(e) => updateField("supervisorDesignation", e.target.value)}
-                  className="w-full p-3 rounded-xl glass-input text-xs text-white placeholder-slate-500"
-                />
-              </div>
-
-              <div className="sm:col-span-2">
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  Supervisor ORCID ID (optional)
-                </label>
-                <input
-                  type="text"
-                  placeholder="https://orcid.org/0000-0000-0000-0000"
-                  value={formData.supervisorOrcidId}
-                  onChange={(e) => updateField("supervisorOrcidId", e.target.value)}
-                  className="w-full p-3 rounded-xl glass-input text-xs text-white placeholder-slate-500"
-                />
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ========================================================================= */}
-        {/* STEP 6: CONTACT & FINAL REVIEW                                            */}
-        {/* ========================================================================= */}
-        {currentStep === 6 && (
-          <div className="space-y-6 animate-fade-in">
-            <div className="border-b border-slate-800 pb-3">
-              <h3 className="text-base font-bold text-white">Step 6: Contact Preferences & Review</h3>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Where should our academic coordinator send quotation and timeline updates?
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  Full Name *
-                </label>
-                <input
-                  type="text"
-                  value={formData.customerName}
-                  onChange={(e) => updateField("customerName", e.target.value)}
-                  className="w-full p-3 rounded-xl glass-input text-xs text-white"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  Email Address *
-                </label>
-                <input
-                  type="email"
-                  value={formData.customerEmail}
-                  onChange={(e) => updateField("customerEmail", e.target.value)}
-                  className="w-full p-3 rounded-xl glass-input text-xs text-white"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  WhatsApp Number (with country code) *
-                </label>
-                <input
-                  type="tel"
-                  placeholder="+91 9876543210"
-                  value={formData.customerWhatsapp}
-                  onChange={(e) => updateField("customerWhatsapp", e.target.value)}
-                  className="w-full p-3 rounded-xl glass-input text-xs text-white"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  Preferred Contact Channel
-                </label>
-                <select
-                  value={formData.preferredContactMethod}
-                  onChange={(e) => updateField("preferredContactMethod", e.target.value as any)}
-                  className="w-full p-3 rounded-xl glass-input text-xs text-white bg-slate-900"
-                >
-                  <option value="WHATSAPP">WhatsApp (Fastest response)</option>
-                  <option value="EMAIL">Email</option>
-                  <option value="PHONE">Phone Call</option>
-                </select>
-              </div>
-            </div>
-
-            {/* Summary Review Card */}
-            <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 text-xs space-y-2.5">
-              <p className="font-bold text-white text-sm">Summary Review</p>
-              <div className="grid grid-cols-2 gap-2 text-slate-300">
+              <section className="card card-pad space-y-6" aria-labelledby="sec-people">
                 <div>
-                  <span className="text-slate-500">Service:</span>{" "}
-                  <strong>{selectedServiceObj?.name}</strong>
+                  <h2 id="sec-people" className="h-card">
+                    {ip ? "Inventor & applicant" : "Authors & supervisor"}
+                  </h2>
+                  <p className="muted mt-1">
+                    {ip
+                      ? "Needed to prepare the application documents correctly."
+                      : "Needed for correct authorship and manuscript formatting."}
+                  </p>
                 </div>
+
+                <PersonRow
+                  title={people.lead.title}
+                  person={draft.lead}
+                  prefix="lead"
+                  errors={errors}
+                  designationHint={people.lead.designationHint}
+                  designationOptions={people.lead.options}
+                  required
+                  onChange={(lead) => update({ lead })}
+                />
+                <PersonRow
+                  title={people.supervisor.title}
+                  person={draft.supervisor}
+                  prefix="supervisor"
+                  errors={errors}
+                  nameLabel={people.supervisor.nameLabel}
+                  designationLabel={ip ? "Applicant type" : undefined}
+                  designationHint={people.supervisor.designationHint}
+                  designationOptions={people.supervisor.options}
+                  required
+                  onChange={(supervisor) => update({ supervisor })}
+                />
+
                 <div>
-                  <span className="text-slate-500">Level:</span> {formData.academicLevel}
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-semibold text-navy-900">
+                      {people.others} <span className="font-normal text-slate-500">(optional)</span>
+                    </h3>
+                    <button
+                      type="button"
+                      className="btn-ghost btn-sm"
+                      onClick={() => update({ others: [...draft.others, emptyPerson()] })}
+                      disabled={draft.others.length >= 10}
+                    >
+                      <Plus className="h-4 w-4" /> Add
+                    </button>
+                  </div>
+                  <div className="mt-3 space-y-3">
+                    {draft.others.map((p, i) => (
+                      <div key={i} data-field={`others.${i}`} className="rounded-md border border-slate-200 p-3">
+                        <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+                          <Field label="Name">
+                            {(id) => (
+                              <input id={id} className="input" value={p.name} onChange={(e) => update({ others: draft.others.map((o, j) => (j === i ? { ...o, name: e.target.value } : o)) })} />
+                            )}
+                          </Field>
+                          <Field label="Designation">
+                            {(id) => (
+                              <ComboInput
+                                id={id}
+                                options={people.otherOptions}
+                                placeholder="Select or type"
+                                value={p.designation}
+                                onChange={(v) => update({ others: draft.others.map((o, j) => (j === i ? { ...o, designation: v } : o)) })}
+                              />
+                            )}
+                          </Field>
+                          <button
+                            type="button"
+                            className="icon-btn"
+                            aria-label={`Remove ${people.others.toLowerCase().slice(0, -1)} ${i + 1}`}
+                            onClick={() => update({ others: draft.others.filter((_, j) => j !== i) })}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                        {err(`others.${i}`) && <p className="error-text">{err(`others.${i}`)}</p>}
+                      </div>
+                    ))}
+                  </div>
                 </div>
-                <div>
-                  <span className="text-slate-500">Publication:</span> {formData.publicationType}
-                </div>
-                <div>
-                  <span className="text-slate-500">Indexing:</span> {formData.indexingRequirement}
-                </div>
-                <div>
-                  <span className="text-slate-500">Citation:</span> {formData.citationStyle}
-                </div>
-                <div>
-                  <span className="text-slate-500">Word Count:</span> {formData.wordCount} words
-                </div>
+              </section>
+
+              <section className="card card-pad space-y-4">
+                <label data-field="consent" className="flex items-start gap-3 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 rounded border-slate-300 text-navy-900 focus:ring-navy-500"
+                    checked={draft.consent}
+                    onChange={(e) => update({ consent: e.target.checked })}
+                  />
+                  <span>
+                    I confirm the information is accurate and agree to the{" "}
+                    <AppLink to="terms" navigate={navigate} className="link" target="_blank">
+                      terms of service
+                    </AppLink>{" "}
+                    and{" "}
+                    <AppLink to="privacy" navigate={navigate} className="link" target="_blank">
+                      privacy policy
+                    </AppLink>
+                    .
+                  </span>
+                </label>
+                {err("consent") && <p className="error-text">{err("consent")}</p>}
+
+                {!isAuthenticated && (
+                  <div className="alert-info">
+                    <Lock className="mt-0.5 h-4 w-4 shrink-0" />
+                    <div>
+                      <p className="font-medium">Sign in to submit and track your request</p>
+                      <p className="mt-0.5 text-navy-700">Your answers are saved — you'll come straight back here.</p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button type="button" className="btn-primary btn-sm" onClick={() => navigate("login", { redirect: "wizard" })}>
+                          Sign in
+                        </button>
+                        <button type="button" className="btn-secondary btn-sm" onClick={() => navigate("register", { redirect: "wizard" })}>
+                          Create an account
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {submitError && (
+                  <div className="alert-error" role="alert">
+                    {submitError}
+                  </div>
+                )}
+              </section>
+
+              <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
+                <button type="button" onClick={goBack} className="btn-secondary btn-lg">
+                  <ArrowLeft className="h-4 w-4" /> Back
+                </button>
+                <button type="submit" className="btn-primary btn-lg" disabled={submitting || !isAuthenticated}>
+                  {submitting ? (
+                    <>
+                      <Spinner /> Submitting…
+                    </>
+                  ) : (
+                    <>
+                      Submit request <Check className="h-4 w-4" />
+                    </>
+                  )}
+                </button>
               </div>
-            </div>
-          </div>
-        )}
-
-        {/* ========================================================================= */}
-        {/* NAVIGATION ACTIONS                                                        */}
-        {/* ========================================================================= */}
-        <div className="pt-6 border-t border-slate-800 flex items-center justify-between gap-4">
-          {currentStep > 1 ? (
-            <button
-              type="button"
-              onClick={handlePrev}
-              disabled={isSubmitting}
-              className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 text-xs font-semibold flex items-center gap-1.5 border border-slate-800"
-            >
-              <ArrowLeft className="w-4 h-4" />
-              <span>Back</span>
-            </button>
-          ) : (
-            <div />
-          )}
-
-          {currentStep < 6 ? (
-            <button
-              type="button"
-              onClick={handleNext}
-              className="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center gap-1.5 shadow-md shadow-indigo-600/30"
-            >
-              <span>Continue</span>
-              <ArrowRight className="w-4 h-4" />
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={handleSubmit}
-              disabled={isSubmitting}
-              className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center gap-2 shadow-lg shadow-emerald-900/40 disabled:opacity-50"
-            >
-              {isSubmitting ? (
-                <>
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  <span>Submitting to Database...</span>
-                </>
-              ) : (
-                <>
-                  <Send className="w-4 h-4" />
-                  <span>Confirm & Submit Request</span>
-                </>
-              )}
-            </button>
+            </>
           )}
         </div>
-      </div>
+
+        {/* Summary */}
+        <aside className="space-y-4 lg:sticky lg:top-24 lg:self-start">
+          <div className="card p-5">
+            <h2 className="text-xs font-semibold uppercase tracking-[0.05em] text-slate-500">Your request</h2>
+            <dl className="mt-4 space-y-3 text-sm">
+              <div>
+                <dt className="text-slate-500">Service</dt>
+                <dd className="font-medium text-navy-900">{service?.name || "Not selected yet"}</dd>
+              </div>
+              {Boolean(draft.topic || draft.requirements.invention_title || draft.requirements.research_topic) && (
+                <div>
+                  <dt className="text-slate-500">Title</dt>
+                  <dd className="font-medium text-navy-900">
+                    {String(draft.requirements.invention_title || draft.requirements.research_topic || draft.topic)}
+                  </dd>
+                </div>
+              )}
+              {draft.deadline && (
+                <div>
+                  <dt className="text-slate-500">Target date</dt>
+                  <dd className="font-medium text-navy-900">{new Date(draft.deadline).toLocaleDateString()}</dd>
+                </div>
+              )}
+              <div>
+                <dt className="text-slate-500">Files</dt>
+                <dd className="font-medium text-navy-900">{draft.files.length || "None"}</dd>
+              </div>
+            </dl>
+          </div>
+          <div className="panel-muted p-5 text-sm text-slate-600">
+            <p className="flex items-center gap-2 font-semibold text-navy-900">
+              <Lock className="h-4 w-4" /> Confidential
+            </p>
+            <p className="mt-2">Only the specialists assigned to your request can see what you share. There is no charge until you accept a quotation.</p>
+          </div>
+        </aside>
+      </form>
     </div>
   );
 };
+
+/* -------------------------------------------------------------------------- */
+/* Pieces                                                                      */
+/* -------------------------------------------------------------------------- */
+
+const Stepper: React.FC<{ step: 1 | 2 }> = ({ step }) => (
+  <ol className="mt-6 flex items-center gap-3 text-sm" aria-label="Progress">
+    {["Your project", "Your details"].map((label, i) => {
+      const n = (i + 1) as 1 | 2;
+      const done = step > n;
+      const active = step === n;
+      return (
+        <li key={label} className="flex items-center gap-3" aria-current={active ? "step" : undefined}>
+          <span
+            className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold ${
+              done ? "bg-emerald-600 text-white" : active ? "bg-navy-900 text-white" : "border border-slate-300 text-slate-500"
+            }`}
+          >
+            {done ? <Check className="h-4 w-4" /> : n}
+          </span>
+          <span className={active ? "font-semibold text-navy-900" : "text-slate-500"}>{label}</span>
+          {n === 1 && <span className="h-px w-8 bg-slate-300 sm:w-16" aria-hidden="true" />}
+        </li>
+      );
+    })}
+  </ol>
+);
+
+const RefSelect: React.FC<{
+  label: string;
+  items?: { id: string; label: string; isActive?: boolean }[];
+  value: string;
+  onChange: (value: string) => void;
+}> = ({ label, items, value, onChange }) => (
+  <Field label={label}>
+    {(id) => (
+      <select id={id} className="input" value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">Select…</option>
+        {(items || [])
+          .filter((i) => i.isActive !== false)
+          .map((i) => (
+            <option key={i.id} value={i.label}>
+              {i.label}
+            </option>
+          ))}
+      </select>
+    )}
+  </Field>
+);
+
+const PersonRow: React.FC<{
+  title: string;
+  person: Person;
+  prefix: string;
+  errors: Record<string, string>;
+  required?: boolean;
+  nameLabel?: string;
+  designationLabel?: string;
+  designationHint?: string;
+  designationOptions: string[];
+  onChange: (p: Person) => void;
+}> = ({ title, person, prefix, errors, required, nameLabel = "Full name", designationLabel = "Designation", designationHint, designationOptions, onChange }) => (
+  <fieldset className="rounded-md border border-slate-200 p-4">
+    <legend className="px-1 text-sm font-semibold text-navy-900">{title}</legend>
+    <div className="grid gap-4 sm:grid-cols-3">
+      <div data-field={`${prefix}.name`}>
+        <Field label={nameLabel} required={required} error={errors[`${prefix}.name`]}>
+          {(id, d) => (
+            <input id={id} aria-describedby={d} className={`input ${errors[`${prefix}.name`] ? "input-error" : ""}`} value={person.name} onChange={(e) => onChange({ ...person, name: e.target.value })} />
+          )}
+        </Field>
+      </div>
+      <div data-field={`${prefix}.designation`}>
+        <Field label={designationLabel} required={required} error={errors[`${prefix}.designation`]}>
+          {(id, d) => (
+            <ComboInput
+              id={id}
+              describedBy={d}
+              options={designationOptions}
+              placeholder={designationHint}
+              invalid={Boolean(errors[`${prefix}.designation`])}
+              value={person.designation}
+              onChange={(designation) => onChange({ ...person, designation })}
+            />
+          )}
+        </Field>
+      </div>
+      <Field label="Email">
+        {(id) => <input id={id} type="email" className="input" value={person.email} onChange={(e) => onChange({ ...person, email: e.target.value })} />}
+      </Field>
+    </div>
+  </fieldset>
+);
+
+/** Renders any requirement field type defined by admins in a service template. */
+const DynamicField: React.FC<{
+  field: RequirementField;
+  value: unknown;
+  error?: string;
+  canUpload: boolean;
+  onChange: (value: unknown) => void;
+}> = ({ field, value, error, canUpload, onChange }) => {
+  const wide = ["LONG_TEXT", "MULTI_SELECT", "CHECKBOX", "RADIO", "FILE", "MULTI_FILE"].includes(field.type);
+  const cls = `input ${error ? "input-error" : ""}`;
+  const str = typeof value === "string" || typeof value === "number" ? String(value) : "";
+  const list = Array.isArray(value) ? (value as string[]) : [];
+
+  const control = (id: string, d?: string) => {
+    switch (field.type) {
+      case "LONG_TEXT":
+        return <textarea id={id} aria-describedby={d} rows={4} className={cls} placeholder={field.placeholder} value={str} onChange={(e) => onChange(e.target.value)} />;
+      case "NUMBER":
+        return <input id={id} aria-describedby={d} type="number" inputMode="decimal" className={cls} placeholder={field.placeholder} value={str} onChange={(e) => onChange(e.target.value === "" ? "" : Number(e.target.value))} />;
+      case "EMAIL":
+        return <input id={id} aria-describedby={d} type="email" className={cls} placeholder={field.placeholder} value={str} onChange={(e) => onChange(e.target.value)} />;
+      case "PHONE":
+        return <input id={id} aria-describedby={d} type="tel" className={cls} placeholder={field.placeholder} value={str} onChange={(e) => onChange(e.target.value)} />;
+      case "DATE":
+        return <input id={id} aria-describedby={d} type="date" className={cls} value={str} onChange={(e) => onChange(e.target.value)} />;
+      case "SELECT":
+        return (
+          <select id={id} aria-describedby={d} className={cls} value={str} onChange={(e) => onChange(e.target.value)}>
+            <option value="">Select…</option>
+            {(field.options || []).map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        );
+      case "RADIO":
+        return (
+          <div id={id} role="radiogroup" aria-describedby={d} className="grid gap-2 sm:grid-cols-2">
+            {(field.options || []).map((o) => (
+              <label key={o.value} className={`choice ${value === o.value ? "choice-active" : ""}`}>
+                <input type="radio" className="mt-0.5 accent-navy-900" name={field.key} checked={value === o.value} onChange={() => onChange(o.value)} />
+                {o.label}
+              </label>
+            ))}
+          </div>
+        );
+      case "MULTI_SELECT":
+      case "CHECKBOX":
+        if (field.type === "CHECKBOX" && !(field.options || []).length) {
+          return (
+            <label className="choice">
+              <input id={id} type="checkbox" className="mt-0.5 accent-navy-900" checked={value === true} onChange={(e) => onChange(e.target.checked)} />
+              {field.placeholder || "Yes"}
+            </label>
+          );
+        }
+        return (
+          <div id={id} aria-describedby={d} className="grid gap-2 sm:grid-cols-2">
+            {(field.options || []).map((o) => {
+              const on = list.includes(o.value);
+              return (
+                <label key={o.value} className={`choice ${on ? "choice-active" : ""}`}>
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 accent-navy-900"
+                    checked={on}
+                    onChange={() => onChange(on ? list.filter((v) => v !== o.value) : [...list, o.value])}
+                  />
+                  {o.label}
+                </label>
+              );
+            })}
+          </div>
+        );
+      case "BOOLEAN":
+        return (
+          <div id={id} role="radiogroup" aria-describedby={d} className="grid grid-cols-2 gap-2">
+            {[
+              { v: true, l: "Yes" },
+              { v: false, l: "No" },
+            ].map((o) => (
+              <label key={o.l} className={`choice justify-center ${value === o.v ? "choice-active" : ""}`}>
+                <input type="radio" className="sr-only" name={field.key} checked={value === o.v} onChange={() => onChange(o.v)} />
+                {o.l}
+              </label>
+            ))}
+          </div>
+        );
+      case "FILE":
+      case "MULTI_FILE":
+        return (
+          <Attachments
+            files={Array.isArray(value) ? (value as FileRef[]) : []}
+            canUpload={canUpload}
+            max={field.type === "FILE" ? 1 : 5}
+            onChange={(files) => onChange(files)}
+          />
+        );
+      default:
+        return <input id={id} aria-describedby={d} className={cls} placeholder={field.placeholder} value={str} onChange={(e) => onChange(e.target.value)} />;
+    }
+  };
+
+  return (
+    <div data-field={`req.${field.key}`} className={wide ? "sm:col-span-2" : ""}>
+      <Field label={field.label} required={field.isRequired} error={error} help={field.description}>
+        {control}
+      </Field>
+    </div>
+  );
+};
+
+/** Upload (when signed in) or link files. */
+const Attachments: React.FC<{
+  files: FileRef[];
+  canUpload: boolean;
+  max?: number;
+  navigate?: Navigate;
+  onChange: (files: FileRef[]) => void;
+}> = ({ files, canUpload, max = 5, navigate, onChange }) => {
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [linkName, setLinkName] = useState("");
+  const [linkUrl, setLinkUrl] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+  const full = files.length >= max;
+
+  const onPick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const picked = Array.from(e.target.files || []).slice(0, max - files.length);
+    e.target.value = "";
+    if (!picked.length) return;
+    setError(null);
+    setUploading(true);
+    const added: FileRef[] = [];
+    for (const f of picked) {
+      try {
+        const res = await uploadFile(f, "references");
+        added.push({ name: f.name, url: res.url, size: res.size });
+      } catch (err) {
+        setError(`${f.name}: ${getErrorMessage(err)}`);
+      }
+    }
+    onChange([...files, ...added]);
+    setUploading(false);
+  };
+
+  const addLink = () => {
+    const url = linkUrl.trim();
+    if (!/^https?:\/\//i.test(url)) {
+      setError("Links must start with http:// or https://");
+      return;
+    }
+    setError(null);
+    onChange([...files, { name: linkName.trim() || url, url }]);
+    setLinkName("");
+    setLinkUrl("");
+  };
+
+  return (
+    <div className="space-y-3">
+      {files.length > 0 && (
+        <ul className="divide-y divide-slate-100 rounded-md border border-slate-200">
+          {files.map((f, i) => (
+            <li key={`${f.url}-${i}`} className="flex items-center gap-3 px-3 py-2.5 text-sm">
+              {/^https?:\/\/[^/]+\/uploads\//.test(f.url) ? <FileText className="h-4 w-4 text-slate-400" /> : <Link2 className="h-4 w-4 text-slate-400" />}
+              <span className="min-w-0 flex-1 truncate text-slate-700">{f.name}</span>
+              <button type="button" className="icon-btn h-8 w-8" aria-label={`Remove ${f.name}`} onClick={() => onChange(files.filter((_, j) => j !== i))}>
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {!full && (
+        <div className="flex flex-col gap-3 sm:flex-row">
+          {canUpload ? (
+            <>
+              <input
+                ref={inputRef}
+                type="file"
+                multiple={max > 1}
+                accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.png,.jpg,.jpeg,.webp"
+                className="sr-only"
+                onChange={onPick}
+                tabIndex={-1}
+              />
+              <button type="button" className="btn-secondary" onClick={() => inputRef.current?.click()} disabled={uploading}>
+                {uploading ? <Spinner /> : <Upload className="h-4 w-4" />}
+                {uploading ? "Uploading…" : "Upload files"}
+              </button>
+            </>
+          ) : (
+            <p className="flex items-center gap-2 text-sm text-slate-500">
+              <Paperclip className="h-4 w-4" />
+              {navigate ? (
+                <span>
+                  <button type="button" className="link" onClick={() => navigate("login", { redirect: "wizard" })}>
+                    Sign in
+                  </button>{" "}
+                  to upload files, or add a link below.
+                </span>
+              ) : (
+                "Sign in to upload files, or add a link."
+              )}
+            </p>
+          )}
+        </div>
+      )}
+
+      {!full && (
+        <div className="grid gap-2 sm:grid-cols-[1fr_1.5fr_auto]">
+          <label className="sr-only" htmlFor="link-name">
+            Link name
+          </label>
+          <input id="link-name" className="input" placeholder="Link name (optional)" value={linkName} onChange={(e) => setLinkName(e.target.value)} />
+          <label className="sr-only" htmlFor="link-url">
+            Link URL
+          </label>
+          <input
+            id="link-url"
+            type="url"
+            className="input"
+            placeholder="https://drive.google.com/…"
+            value={linkUrl}
+            onChange={(e) => setLinkUrl(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                addLink();
+              }
+            }}
+          />
+          <button type="button" className="btn-secondary" onClick={addLink} disabled={!linkUrl.trim()}>
+            <Plus className="h-4 w-4" /> Add link
+          </button>
+        </div>
+      )}
+      <p className="help">PDF, Word, Excel, PowerPoint, ZIP or images, up to 10 MB each. Maximum {max} item{max === 1 ? "" : "s"}.</p>
+      {error && <p className="error-text">{error}</p>}
+    </div>
+  );
+};
+
+const SubmittedView: React.FC<{ request: ServiceRequest; navigate: Navigate; onAnother: () => void }> = ({ request, navigate, onAnother }) => (
+  <div className="bg-slate-50">
+    <div className="container-page section max-w-2xl">
+      <div className="card overflow-hidden text-center">
+        <div className="bg-navy-900 px-6 py-10 text-white">
+          <CheckCircle2 className="mx-auto h-12 w-12 text-accent-300" />
+          <h1 className="mt-4 font-serif text-3xl font-semibold text-white">Request received</h1>
+          <p className="mt-2 text-navy-200">Thank you. A specialist will review your brief shortly.</p>
+        </div>
+        <div className="p-6 sm:p-8">
+          <p className="text-sm text-slate-500">Your reference number</p>
+          <p className="mt-1 font-mono text-2xl font-semibold tracking-wide text-navy-900">{request.requestNumber}</p>
+          <ol className="mt-8 space-y-4 text-left text-sm">
+            {[
+              "We review your brief and may message you if we need anything else.",
+              "You receive a written quotation in your dashboard.",
+              "After payment is confirmed, work begins and you can track every step.",
+            ].map((t, i) => (
+              <li key={t} className="flex gap-3">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-navy-50 text-xs font-semibold text-navy-700">{i + 1}</span>
+                <span className="text-slate-700">{t}</span>
+              </li>
+            ))}
+          </ol>
+          <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-center">
+            <button type="button" className="btn-primary" onClick={() => navigate("customer-dashboard", { tab: "requests" })}>
+              Track this request
+            </button>
+            <button type="button" className="btn-secondary" onClick={onAnother}>
+              Submit another request
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+);

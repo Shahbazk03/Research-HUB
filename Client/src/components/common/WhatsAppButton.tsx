@@ -1,7 +1,6 @@
 import React from "react";
-import { MessageSquare } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
-import { getPublicSettings } from "../../api";
+import { MessageCircle } from "lucide-react";
+import { useSettings, whatsappLink } from "../../hooks/usePublicData";
 
 interface WhatsAppButtonProps {
   requestNumber?: string;
@@ -9,6 +8,7 @@ interface WhatsAppButtonProps {
   className?: string;
   size?: "sm" | "md" | "lg";
   label?: string;
+  /** floating = fixed bottom-right bubble (default when used without props) */
   variant?: "floating" | "button" | "link";
 }
 
@@ -18,66 +18,56 @@ export const WhatsAppButton: React.FC<WhatsAppButtonProps> = ({
   className = "",
   size = "md",
   label,
-  variant = "button",
+  variant,
 }) => {
-  const { data: settings } = useQuery({
-    queryKey: ["site-settings"],
-    queryFn: getPublicSettings,
-    staleTime: 1000 * 30,
-  });
+  const { data: settings } = useSettings();
+  const mode = variant ?? (requestNumber || serviceName || label ? "button" : "floating");
 
-  const whatsappNum = settings?.whatsappNumber || "918004153053";
-
-  let text = "Hello Research Hub, I have an inquiry regarding academic research services.";
+  let text = "Hello Research Hub, I would like to know more about your services.";
   if (requestNumber && serviceName) {
-    text = (settings?.whatsappDefaultMessageTemplate || "Hello Research Hub, I am inquiring about Service Request #{requestNumber} ({serviceName}). Please provide updates and quotations.")
-      .replace(/#?\{requestNumber\}/g, requestNumber)
+    text = (
+      settings?.whatsappDefaultMessageTemplate ||
+      "Hello Research Hub, I am writing about request #{requestNumber} ({serviceName})."
+    )
+      .replace(/#?\{requestNumber\}/g, `#${requestNumber}`)
       .replace(/\{serviceName\}/g, serviceName);
   } else if (serviceName) {
-    text = `Hello Research Hub, I would like to inquire about "${serviceName}". Please share details and pricing scope.`;
+    text = `Hello Research Hub, I would like to discuss "${serviceName}".`;
   } else if (requestNumber) {
-    text = `Hello Research Hub, I am inquiring about Service Request #${requestNumber}.`;
+    text = `Hello Research Hub, I am writing about request #${requestNumber}.`;
   }
 
-  const cleanNum = whatsappNum.replace(/[^0-9]/g, "");
-  const whatsappUrl = `https://wa.me/${cleanNum}?text=${encodeURIComponent(text)}`;
+  const href = whatsappLink(settings?.whatsappNumber, text);
+  if (!href) return null;
 
-  if (variant === "floating") {
+  if (mode === "floating") {
     return (
       <a
-        href={whatsappUrl}
+        href={href}
         target="_blank"
         rel="noopener noreferrer"
-        aria-label="Direct WhatsApp Consultation"
-        className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 px-4 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-full shadow-2xl shadow-emerald-950/60 transition-all duration-300 hover:scale-105 group border border-emerald-400/30 backdrop-blur-sm"
+        aria-label="Chat with us on WhatsApp"
+        className="fixed bottom-5 right-5 z-30 flex h-12 w-12 items-center justify-center rounded-full bg-[#1FAF5A] text-white shadow-lift transition-transform hover:scale-105 sm:bottom-6 sm:right-6"
       >
-        <div className="relative">
-          <MessageSquare className="w-5 h-5" />
-          <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-300 opacity-75"></span>
-            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-200"></span>
-          </span>
-        </div>
-        <span className="text-sm font-semibold tracking-wide">WhatsApp Support</span>
+        <MessageCircle className="h-6 w-6" />
       </a>
     );
   }
 
-  const sizeClasses = {
-    sm: "px-2.5 py-1.5 text-[10px] sm:text-xs gap-1.5",
-    md: "px-4 py-2.5 text-sm gap-2",
-    lg: "px-6 py-3.5 text-base gap-2.5",
-  };
+  if (mode === "link") {
+    return (
+      <a href={href} target="_blank" rel="noopener noreferrer" className={`link inline-flex items-center gap-1.5 ${className}`}>
+        <MessageCircle className="h-4 w-4" />
+        {label || "Chat on WhatsApp"}
+      </a>
+    );
+  }
 
+  const sizeCls = size === "sm" ? "btn-sm" : size === "lg" ? "btn-lg" : "";
   return (
-    <a
-      href={whatsappUrl}
-      target="_blank"
-      rel="noopener noreferrer"
-      className={`inline-flex items-center justify-center font-medium rounded-xl transition-all duration-200 bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-950/40 hover:shadow-emerald-900/50 border border-emerald-400/20 active:scale-[0.98] max-w-full ${sizeClasses[size]} ${className}`}
-    >
-      <MessageSquare className={size === "sm" ? "w-3.5 h-3.5 shrink-0" : "w-4 h-4 shrink-0"} />
-      <span className="truncate whitespace-nowrap">{label || "Discuss on WhatsApp"}</span>
+    <a href={href} target="_blank" rel="noopener noreferrer" className={`btn-secondary ${sizeCls} ${className}`}>
+      <MessageCircle className="h-4 w-4 text-[#1FAF5A]" />
+      {label || "Chat on WhatsApp"}
     </a>
   );
 };

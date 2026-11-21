@@ -7,8 +7,12 @@ export const API_BASE_URL =
     ? "http://localhost:5000/api"
     : "https://research-hub-wp59.onrender.com/api");
 
+/** Fired when the server rejects the stored session so the UI can sign the user out. */
+export const SESSION_EXPIRED_EVENT = "rh:session-expired";
+
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
+  timeout: 60000, // Render free instances can take ~30-50s to wake up
   headers: {
     "Content-Type": "application/json",
   },
@@ -16,7 +20,7 @@ const apiClient = axios.create({
 
 apiClient.interceptors.request.use(
   (config) => {
-    // Use tab-isolated sessionStorage so Admin and Customer accounts can run in separate tabs simultaneously
+    // Tab-isolated sessionStorage so admin and customer accounts can run in separate tabs
     const token = sessionStorage.getItem("rh_token");
     if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`;
@@ -29,12 +33,11 @@ apiClient.interceptors.request.use(
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
-      // Don't auto-redirect on login attempt failures
-      if (!error.config.url.includes("/auth/login") && !error.config.url.includes("/auth/register")) {
-        sessionStorage.removeItem("rh_token");
-        sessionStorage.removeItem("rh_user");
-      }
+    const url: string = error.config?.url || "";
+    if (error.response?.status === 401 && !url.includes("/auth/login") && !url.includes("/auth/register")) {
+      sessionStorage.removeItem("rh_token");
+      sessionStorage.removeItem("rh_user");
+      window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
     }
     return Promise.reject(error);
   }

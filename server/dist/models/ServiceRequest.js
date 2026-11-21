@@ -26,6 +26,16 @@ export const isValidStatusTransition = (currentStatus, newStatus) => {
     const allowed = VALID_STATUS_TRANSITIONS[currentStatus];
     return allowed ? allowed.includes(newStatus) : false;
 };
+export const REQUEST_ACTIVITY_TYPES = [
+    "CREATED",
+    "STATUS",
+    "MESSAGE",
+    "QUOTATION",
+    "PAYMENT_SUBMITTED",
+    "PAYMENT_VERIFIED",
+    "PAYMENT_REJECTED",
+    "DELIVERABLE",
+];
 const serviceRequestSchema = new Schema({
     requestNumber: {
         type: String,
@@ -181,10 +191,7 @@ const serviceRequestSchema = new Schema({
             trim: true,
         },
         amountPaid: Number,
-        currency: {
-            type: String,
-            default: "INR",
-        },
+        currency: String,
         payerName: String,
         payerUpiId: String,
         screenshotUrl: String,
@@ -193,7 +200,6 @@ const serviceRequestSchema = new Schema({
         status: {
             type: String,
             enum: ["PENDING_VERIFICATION", "VERIFIED", "REJECTED"],
-            default: "PENDING_VERIFICATION",
         },
         verifiedAt: Date,
         adminVerificationNotes: String,
@@ -220,6 +226,31 @@ const serviceRequestSchema = new Schema({
         ref: "User",
         index: true,
     },
+    activity: [
+        {
+            type: {
+                type: String,
+                enum: REQUEST_ACTIVITY_TYPES,
+                required: true,
+            },
+            actor: {
+                type: String,
+                enum: ["CUSTOMER", "STAFF", "SYSTEM"],
+                required: true,
+            },
+            actorName: { type: String, trim: true, maxlength: 200 },
+            message: { type: String, trim: true, maxlength: 5000 },
+            status: String,
+            files: [
+                {
+                    _id: false,
+                    name: { type: String, required: true },
+                    url: { type: String, required: true },
+                },
+            ],
+            createdAt: { type: Date, default: Date.now },
+        },
+    ],
 }, {
     timestamps: true,
 });
@@ -233,6 +264,9 @@ serviceRequestSchema.index({
 });
 serviceRequestSchema.index({
     "customer.email": 1,
+});
+serviceRequestSchema.index({
+    createdAt: -1,
 });
 const ServiceRequest = mongoose.model("ServiceRequest", serviceRequestSchema);
 export default ServiceRequest;

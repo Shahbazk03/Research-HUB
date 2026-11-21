@@ -10,6 +10,8 @@ import {
     getPublicFaqs,
 } from "../controllers/publicCatalog.controller.js";
 
+import { getPublicExperts } from "../controllers/experts.controller.js";
+
 const router = Router();
 
 // Public routes for visitors and customers
@@ -21,5 +23,6 @@ router.get("/services/:serviceId/template", getPublicServiceTemplate);
 router.get("/reference-data", getPublicReferenceData);
 router.get("/settings", getPublicSettings);
 router.get("/faqs", getPublicFaqs);
+router.get("/experts", getPublicExperts);
 
 export default router;

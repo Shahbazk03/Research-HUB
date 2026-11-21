@@ -1,241 +1,237 @@
-import React, { useState } from "react";
-import {
-  GraduationCap,
-  Layers,
-  BookOpen,
-  Search,
-  LogIn,
-  UserPlus,
-  LayoutDashboard,
-  ShieldAlert,
-  LogOut,
-  Menu,
-  X,
-  FileText,
-  Sparkles,
-} from "lucide-react";
+import React, { useEffect, useRef, useState } from "react";
+import { ChevronDown, LayoutDashboard, LogOut, Menu, ShieldCheck, User as UserIcon, X } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
-import { WhatsAppButton } from "./WhatsAppButton";
+import { AppLink } from "../ui";
+import { Navigate, RouteType } from "../../router";
 
-interface NavbarProps {
-  currentRoute: string;
-  navigate: (route: string, params?: any) => void;
-}
+export const Logo: React.FC<{ navigate: Navigate; inverted?: boolean }> = ({ navigate, inverted }) => (
+  <AppLink to="home" navigate={navigate} className="flex items-center gap-2.5" aria-label="Research Hub home">
+    <span
+      className={`flex h-9 w-9 items-center justify-center rounded-md font-serif text-lg font-bold ${
+        inverted ? "bg-white text-navy-900" : "bg-navy-900 text-white"
+      }`}
+    >
+      R
+    </span>
+    <span className="leading-tight">
+      <span className={`block text-[15px] font-semibold tracking-tight ${inverted ? "text-white" : "text-navy-900"}`}>
+        Research Hub
+      </span>
+      <span className={`block text-[11px] font-medium uppercase tracking-[0.05em] ${inverted ? "text-navy-200" : "text-slate-500"}`}>
+        Research · Publication · IP
+      </span>
+    </span>
+  </AppLink>
+);
 
-export const Navbar: React.FC<NavbarProps> = ({ currentRoute, navigate }) => {
-  const { user, isAuthenticated, isStaff, logout } = useAuth();
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+const NAV: { label: string; route: RouteType }[] = [
+  { label: "Services", route: "services" },
+  { label: "Patents & IP", route: "patents" },
+  { label: "Experts", route: "experts" },
+  { label: "About", route: "about" },
+  { label: "Contact", route: "contact" },
+];
 
-  const navItems = [
-    { id: "home", label: "Overview", icon: BookOpen },
-    { id: "services", label: "Research Services", icon: Layers },
-    { id: "wizard", label: "Submit Request", icon: Sparkles, highlight: true },
-  ];
+export const Navbar: React.FC<{ currentRoute: RouteType; navigate: Navigate }> = ({ currentRoute, navigate }) => {
+  const { user, isAuthenticated, isStaff, isWriter, logout } = useAuth();
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
 
-  const handleNav = (route: string) => {
-    navigate(route);
-    setMobileMenuOpen(false);
+  useEffect(() => {
+    setMobileOpen(false);
+    setMenuOpen(false);
+  }, [currentRoute]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const close = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    };
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && setMenuOpen(false);
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", esc);
+    };
+  }, [menuOpen]);
+
+  const isActive = (route: RouteType) =>
+    currentRoute === route || (route === "services" && currentRoute === "service-detail");
+
+  const handleLogout = () => {
+    logout();
+    navigate("home");
   };
 
+  const initials = `${user?.firstName?.[0] || ""}${user?.lastName?.[0] || ""}`.toUpperCase() || "U";
+
   return (
-    <header className="sticky top-0 z-40 w-full border-b border-slate-800/80 bg-[#020c1a]/90 backdrop-blur-xl">
-      <div className="w-full max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-[72px]">
-          {/* Logo (Responsive, single source of truth) */}
-          <div
-            onClick={() => handleNav("home")}
-            className="flex items-center gap-2.5 sm:gap-3 min-w-0 cursor-pointer group select-none shrink-0"
-          >
-            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-violet-500 flex items-center justify-center shadow-lg shadow-indigo-500/25 border border-indigo-400/30 group-hover:scale-105 transition-transform shrink-0">
-              <GraduationCap className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
-            </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-1.5 min-w-0">
-                <span className="text-[16px] sm:text-[19px] font-bold tracking-tight text-white group-hover:text-indigo-200 transition-colors whitespace-nowrap">
-                  Research<span className="text-indigo-400 font-extrabold">Hub</span>
-                </span>
-                <span className="inline-block px-1.5 py-0.5 text-[8px] sm:text-[9px] font-semibold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded shrink-0 tracking-[0.12em]">
-                  ACADEMIC
-                </span>
-              </div>
-              <p className="text-[10px] text-slate-400 font-medium hidden md:block leading-none mt-0.5">
-                Advisory & Publication Platform
-              </p>
-            </div>
-          </div>
+    <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/85">
+      <div className="container-page flex h-16 items-center justify-between gap-4">
+        <Logo navigate={navigate} />
 
-          {/* Desktop Navigation */}
-          <nav className="hidden md:flex items-center gap-2">
-            {navItems.map((item) => {
-              const active = currentRoute === item.id;
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => handleNav(item.id)}
-                  className={`px-3.5 py-2 rounded-xl text-[15px] font-medium transition-all duration-150 flex items-center gap-2 border ${
-                    item.highlight
-                      ? "text-indigo-200 hover:text-white bg-indigo-500/10 hover:bg-indigo-500/20 border-indigo-500/25"
-                      : active
-                      ? "text-white bg-slate-800/80 border-slate-700/70"
-                      : "text-slate-300 hover:text-white hover:bg-slate-900 border-slate-800/80"
-                  }`}
-                >
-                  <item.icon className="w-4 h-4 text-indigo-400" />
-                  <span>{item.label}</span>
-                </button>
-              );
-            })}
-          </nav>
-
-          {/* Desktop Right Actions */}
-          <div className="hidden md:flex items-center gap-2.5">
-            <WhatsAppButton size="sm" label="WhatsApp" className="!rounded-xl !shadow-lg !shadow-emerald-900/20 !h-[42px] !px-3.5" />
-
-            {isAuthenticated ? (
-              <div className="flex items-center gap-2 pl-1.5 border-l border-slate-800">
-                <button
-                  onClick={() => handleNav("customer-dashboard")}
-                  className={`flex items-center gap-2 px-3 py-2 rounded-xl text-[15px] font-medium transition-colors ${
-                    currentRoute === "customer-dashboard"
-                      ? "bg-indigo-600 text-white"
-                      : "bg-slate-800 hover:bg-slate-700 text-slate-200"
-                  }`}
-                >
-                  <FileText className="w-4 h-4 text-indigo-300" />
-                  <span>My Requests</span>
-                </button>
-
-                {isStaff && (
-                  <button
-                    onClick={() => handleNav("admin-dashboard")}
-                    className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-[15px] font-medium border transition-colors ${
-                      currentRoute === "admin-dashboard"
-                        ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
-                        : "bg-amber-500/10 text-amber-400 border-amber-500/20 hover:bg-amber-500/20"
-                    }`}
-                  >
-                    <ShieldAlert className="w-4 h-4 text-amber-400" />
-                    <span>Admin</span>
-                  </button>
-                )}
-
-                <button
-                  onClick={logout}
-                  title="Sign Out"
-                  className="p-2 rounded-xl text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
-                >
-                  <LogOut className="w-4 h-4" />
-                </button>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2 pl-1.5 border-l border-slate-800">
-                <button
-                  onClick={() => handleNav("login")}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-[15px] font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
-                >
-                  <LogIn className="w-4 h-4 text-slate-400" />
-                  <span>Sign In</span>
-                </button>
-                <button
-                  onClick={() => handleNav("register")}
-                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[15px] font-medium bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/20 transition-all hover:scale-[1.02] active:scale-[0.98]"
-                >
-                  <UserPlus className="w-4 h-4" />
-                  <span>Register</span>
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* Mobile Right Actions (WhatsApp + Hamburger) */}
-          <div className="flex md:hidden items-center gap-2 shrink-0">
-            <WhatsAppButton
-              size="sm"
-              label="WhatsApp"
-              className="!h-[36px] !rounded-xl !px-3 !text-[11px] !font-semibold !shadow-md shadow-emerald-900/20"
-            />
-            <button
-              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="p-2 rounded-xl text-slate-300 hover:text-white bg-slate-900/80 border border-slate-800 hover:bg-slate-800 focus:outline-none shrink-0 transition-colors"
-              aria-label="Toggle mobile navigation"
+        <nav className="hidden items-center gap-1 lg:flex" aria-label="Main">
+          {NAV.map((item) => (
+            <AppLink
+              key={item.route}
+              to={item.route}
+              navigate={navigate}
+              aria-current={isActive(item.route) ? "page" : undefined}
+              className={`rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                isActive(item.route) ? "text-navy-900" : "text-slate-600 hover:text-navy-900"
+              }`}
             >
-              {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-            </button>
-          </div>
+              {item.label}
+              <span
+                className={`mx-auto mt-0.5 block h-0.5 rounded-full bg-accent-500 transition-all ${
+                  isActive(item.route) ? "w-5" : "w-0"
+                }`}
+              />
+            </AppLink>
+          ))}
+        </nav>
+
+        <div className="hidden items-center gap-3 lg:flex">
+          {isAuthenticated ? (
+            <div className="relative" ref={menuRef}>
+              <button
+                type="button"
+                onClick={() => setMenuOpen((o) => !o)}
+                className="flex items-center gap-2 rounded-md border border-slate-200 py-1.5 pl-1.5 pr-2.5 text-sm font-medium text-navy-900 hover:bg-slate-50"
+                aria-expanded={menuOpen}
+                aria-haspopup="menu"
+              >
+                <span className="flex h-7 w-7 items-center justify-center rounded bg-navy-900 text-xs font-semibold text-white">
+                  {initials}
+                </span>
+                <span className="max-w-[9rem] truncate">{user?.firstName}</span>
+                <ChevronDown className="h-4 w-4 text-slate-400" />
+              </button>
+              {menuOpen && (
+                <div role="menu" className="absolute right-0 mt-2 w-60 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lift animate-fade-in">
+                  <div className="border-b border-slate-100 px-4 py-3">
+                    <p className="truncate text-sm font-semibold text-navy-900">
+                      {user?.firstName} {user?.lastName}
+                    </p>
+                    <p className="truncate text-xs text-slate-500">{user?.email}</p>
+                  </div>
+                  {isWriter ? (
+                    <>
+                      <MenuItem icon={<LayoutDashboard className="h-4 w-4" />} onClick={() => navigate("writer", { tab: "work" })}>
+                        Writer portal
+                      </MenuItem>
+                      <MenuItem icon={<UserIcon className="h-4 w-4" />} onClick={() => navigate("writer", { tab: "profile" })}>
+                        My profile
+                      </MenuItem>
+                    </>
+                  ) : (
+                    <>
+                      <MenuItem icon={<LayoutDashboard className="h-4 w-4" />} onClick={() => navigate("customer-dashboard", { tab: "requests" })}>
+                        My requests
+                      </MenuItem>
+                      <MenuItem icon={<UserIcon className="h-4 w-4" />} onClick={() => navigate("customer-dashboard", { tab: "profile" })}>
+                        Profile
+                      </MenuItem>
+                    </>
+                  )}
+                  {isStaff && (
+                    <MenuItem icon={<ShieldCheck className="h-4 w-4" />} onClick={() => navigate("admin-dashboard")}>
+                      Administration
+                    </MenuItem>
+                  )}
+                  <div className="my-1 border-t border-slate-100" />
+                  <MenuItem icon={<LogOut className="h-4 w-4" />} onClick={handleLogout}>
+                    Sign out
+                  </MenuItem>
+                </div>
+              )}
+            </div>
+          ) : (
+            <AppLink to="login" navigate={navigate} className="btn-ghost">
+              Sign in
+            </AppLink>
+          )}
+          {isWriter ? (
+            <AppLink to="writer" params={{ tab: "projects" }} navigate={navigate} className="btn-primary">
+              Open projects
+            </AppLink>
+          ) : (
+            <AppLink to="wizard" navigate={navigate} className="btn-primary">
+              Start a request
+            </AppLink>
+          )}
         </div>
+
+        <button
+          type="button"
+          className="icon-btn lg:hidden"
+          onClick={() => setMobileOpen((o) => !o)}
+          aria-label={mobileOpen ? "Close menu" : "Open menu"}
+          aria-expanded={mobileOpen}
+        >
+          {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+        </button>
       </div>
 
-      {/* Mobile Menu Overlay */}
-      {mobileMenuOpen && (
-        <div className="md:hidden border-b border-slate-800 bg-slate-950/95 backdrop-blur-2xl px-4 pt-3 pb-6 space-y-3">
-          <div className="space-y-1">
-            {navItems.map((item) => (
-              <button
-                key={item.id}
-                onClick={() => handleNav(item.id)}
-                className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium ${
-                  currentRoute === item.id
-                    ? "bg-indigo-600/20 text-indigo-300 border border-indigo-500/30"
-                    : "text-slate-300 hover:bg-slate-900"
+      {mobileOpen && (
+        <div className="border-t border-slate-200 bg-white lg:hidden animate-fade-in">
+          <nav className="container-page flex flex-col py-3" aria-label="Mobile">
+            {NAV.map((item) => (
+              <AppLink
+                key={item.route}
+                to={item.route}
+                navigate={navigate}
+                className={`rounded-md px-3 py-3 text-base font-medium ${
+                  isActive(item.route) ? "bg-navy-50 text-navy-900" : "text-slate-700"
                 }`}
               >
-                <item.icon className="w-4 h-4 text-indigo-400" />
-                <span>{item.label}</span>
-              </button>
+                {item.label}
+              </AppLink>
             ))}
-          </div>
-
-          <div className="pt-3 border-t border-slate-800 space-y-2">
+            <div className="my-3 border-t border-slate-200" />
             {isAuthenticated ? (
               <>
-                <button
-                  onClick={() => handleNav("customer-dashboard")}
-                  className="w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl text-sm font-medium bg-slate-900 text-white"
+                <AppLink
+                  to={isWriter ? "writer" : "customer-dashboard"}
+                  navigate={navigate}
+                  className="rounded-md px-3 py-3 text-base font-medium text-slate-700"
                 >
-                  <FileText className="w-4 h-4 text-indigo-400" />
-                  <span>My Research Requests</span>
-                </button>
-
+                  {isWriter ? "Writer portal" : "My requests"}
+                </AppLink>
                 {isStaff && (
-                  <button
-                    onClick={() => handleNav("admin-dashboard")}
-                    className="w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl text-sm font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20"
-                  >
-                    <ShieldAlert className="w-4 h-4 text-amber-400" />
-                    <span>Admin Panel</span>
-                  </button>
+                  <AppLink to="admin-dashboard" navigate={navigate} className="rounded-md px-3 py-3 text-base font-medium text-slate-700">
+                    Administration
+                  </AppLink>
                 )}
-
-                <button
-                  onClick={() => {
-                    logout();
-                    setMobileMenuOpen(false);
-                  }}
-                  className="w-full flex items-center gap-2.5 px-3.5 py-2 rounded-xl text-sm font-medium text-rose-400 hover:bg-rose-500/10"
-                >
-                  <LogOut className="w-4 h-4" />
-                  <span>Sign Out ({user?.firstName})</span>
+                <button type="button" onClick={handleLogout} className="rounded-md px-3 py-3 text-left text-base font-medium text-slate-700">
+                  Sign out
                 </button>
               </>
             ) : (
-              <div className="grid grid-cols-2 gap-2 pt-1">
-                <button
-                  onClick={() => handleNav("login")}
-                  className="w-full py-2.5 px-3 rounded-xl text-center text-sm font-medium bg-slate-900 text-slate-200 border border-slate-800"
-                >
-                  Sign In
-                </button>
-                <button
-                  onClick={() => handleNav("register")}
-                  className="w-full py-2.5 px-3 rounded-xl text-center text-sm font-medium bg-indigo-600 text-white shadow-lg"
-                >
-                  Register
-                </button>
-              </div>
+              <AppLink to="login" navigate={navigate} className="rounded-md px-3 py-3 text-base font-medium text-slate-700">
+                Sign in
+              </AppLink>
             )}
-          </div>
+            <AppLink to="wizard" navigate={navigate} className="btn-primary btn-lg mt-3 w-full">
+              Start a request
+            </AppLink>
+          </nav>
         </div>
       )}
     </header>
   );
 };
+
+const MenuItem: React.FC<{ icon: React.ReactNode; onClick: () => void; children: React.ReactNode }> = ({ icon, onClick, children }) => (
+  <button
+    type="button"
+    role="menuitem"
+    onClick={onClick}
+    className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-700 hover:bg-slate-50 hover:text-navy-900"
+  >
+    <span className="text-slate-400">{icon}</span>
+    {children}
+  </button>
+);

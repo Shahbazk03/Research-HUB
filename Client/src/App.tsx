@@ -1,212 +1,147 @@
-import React, { useState, useEffect } from "react";
+import React, { Suspense, lazy, useEffect, useState } from "react";
 import { Navbar } from "./components/common/Navbar";
 import { Footer } from "./components/common/Footer";
+import { WhatsAppButton } from "./components/common/WhatsAppButton";
 import { HomePage } from "./pages/HomePage";
 import { ServicesPage } from "./pages/ServicesPage";
 import { ServiceDetailPage } from "./pages/ServiceDetailPage";
+import { PatentsPage } from "./pages/PatentsPage";
 import { RequestWizardPage } from "./pages/RequestWizardPage";
 import { LoginPage } from "./pages/LoginPage";
 import { RegisterPage } from "./pages/RegisterPage";
-import { CustomerDashboardPage } from "./pages/CustomerDashboardPage";
-import { AdminDashboardPage } from "./pages/AdminDashboardPage";
+// Account areas are loaded on demand so public visitors don't download them
+const CustomerDashboardPage = lazy(() =>
+  import("./pages/CustomerDashboardPage").then((m) => ({ default: m.CustomerDashboardPage }))
+);
+const WriterPortalPage = lazy(() =>
+  import("./pages/WriterPortalPage").then((m) => ({ default: m.WriterPortalPage }))
+);
+const AdminDashboardPage = lazy(() =>
+  import("./pages/AdminDashboardPage").then((m) => ({ default: m.AdminDashboardPage }))
+);
+import { AboutPage, ContactPage, LegalPage, NotFoundPage } from "./pages/InfoPages";
+import { ExpertsPage, JoinExpertsPage } from "./pages/ExpertsPages";
+import { PageLoader } from "./components/ui";
 import { useAuth } from "./context/AuthContext";
+import { migrateHashUrl, navigateTo, NAVIGATION_EVENT, parseLocation, RouteParams, RouteType } from "./router";
 
-export type RouteType =
-  | "home"
-  | "services"
-  | "service-detail"
-  | "wizard"
-  | "login"
-  | "register"
-  | "customer-dashboard"
-  | "admin-dashboard";
+export type { RouteType } from "./router";
+
+const readLocation = () => parseLocation(window.location.pathname, window.location.search);
 
 export const App: React.FC = () => {
-  const { user, isAuthenticated, isStaff, isLoading } = useAuth();
+  const { isAuthenticated, isStaff, isWriter, isLoading } = useAuth();
 
-  // Route & Params state
-  const [route, setRoute] = useState<RouteType>("home");
-  const [params, setParams] = useState<any>({});
+  const [{ route, params }, setLocation] = useState<{ route: RouteType; params: RouteParams }>(() => {
+    migrateHashUrl();
+    return readLocation();
+  });
 
-  // Parse URL hash to state
-  const parseHash = () => {
-    const hash = window.location.hash.replace(/^#\/?/, "");
-    if (!hash || hash === "") {
-      setRoute("home");
-      setParams({});
-      return;
-    }
-
-    const [pathPart, queryPart] = hash.split("?");
-    const queryParams: Record<string, string> = {};
-    if (queryPart) {
-      new URLSearchParams(queryPart).forEach((val, key) => {
-        queryParams[key] = val;
-      });
-    }
-
-    if (pathPart === "services") {
-      setRoute("services");
-      setParams(queryParams);
-    } else if (pathPart.startsWith("services/")) {
-      const slug = pathPart.replace("services/", "");
-      setRoute("service-detail");
-      setParams({ slug, ...queryParams });
-    } else if (pathPart === "wizard" || pathPart === "request") {
-      setRoute("wizard");
-      setParams(queryParams);
-    } else if (pathPart === "login") {
-      setRoute("login");
-      setParams(queryParams);
-    } else if (pathPart === "register") {
-      setRoute("register");
-      setParams(queryParams);
-    } else if (pathPart === "dashboard" || pathPart === "customer-dashboard") {
-      setRoute("customer-dashboard");
-      setParams(queryParams);
-    } else if (pathPart === "admin" || pathPart === "admin-dashboard") {
-      setRoute("admin-dashboard");
-      setParams(queryParams);
-    } else {
-      setRoute("home");
-      setParams({});
-    }
-  };
-
-  // Sync hash on mount and popstate
   useEffect(() => {
-    parseHash();
-    const handleHashChange = () => parseHash();
-    window.addEventListener("hashchange", handleHashChange);
-    return () => window.removeEventListener("hashchange", handleHashChange);
+    const sync = () => setLocation(readLocation());
+    window.addEventListener("popstate", sync);
+    window.addEventListener(NAVIGATION_EVENT, sync);
+    return () => {
+      window.removeEventListener("popstate", sync);
+      window.removeEventListener(NAVIGATION_EVENT, sync);
+    };
   }, []);
 
-  // Navigation function
-  const navigate = (newRoute: string, newParams: any = {}) => {
-    window.scrollTo({ top: 0, behavior: "smooth" });
+  const navigate = navigateTo;
+  const isAdminView = route === "admin-dashboard";
+  // Sign-in screens (including the sign-in shown for protected pages) are full-height and have no footer
+  const isAuthPage =
+    route === "login" ||
+    route === "register" ||
+    (!isLoading && (route === "customer-dashboard" || route === "writer") && !isAuthenticated) ||
+    (!isLoading && route === "admin-dashboard" && !isAuthenticated);
 
-    // Update hash for deep linking
-    let targetHash = "";
-    if (newRoute === "home") targetHash = "#/";
-    else if (newRoute === "services") {
-      const qs = newParams?.search || newParams?.domainId ? `?${new URLSearchParams(newParams).toString()}` : "";
-      targetHash = `#/services${qs}`;
-    } else if (newRoute === "service-detail") {
-      targetHash = `#/services/${newParams?.slug || ""}`;
-    } else if (newRoute === "wizard") {
-      const qs = newParams?.serviceId ? `?serviceId=${newParams.serviceId}` : "";
-      targetHash = `#/wizard${qs}`;
-    } else if (newRoute === "login") {
-      const qs = newParams?.redirect ? `?redirect=${encodeURIComponent(newParams.redirect)}` : "";
-      targetHash = `#/login${qs}`;
-    } else if (newRoute === "register") {
-      targetHash = "#/register";
-    } else if (newRoute === "customer-dashboard") {
-      let activeTab = newParams?.tab;
-      if (!activeTab && typeof sessionStorage !== "undefined") {
-        activeTab = sessionStorage.getItem("customer_active_tab") || undefined;
-      }
-      const qs = activeTab ? `?tab=${encodeURIComponent(activeTab)}` : "";
-      targetHash = `#/dashboard${qs}`;
-    } else if (newRoute === "admin-dashboard") {
-      let activeTab = newParams?.tab;
-      if (!activeTab && typeof sessionStorage !== "undefined") {
-        activeTab = sessionStorage.getItem("admin_active_tab") || undefined;
-      }
-      const qs = activeTab ? `?tab=${encodeURIComponent(activeTab)}` : "";
-      targetHash = `#/admin${qs}`;
-    } else {
-      targetHash = `#/${newRoute}`;
-    }
-
-    if (window.location.hash !== targetHash) {
-      window.location.hash = targetHash;
-    } else {
-      setRoute(newRoute as RouteType);
-      setParams(newParams || {});
-    }
-  };
-
-  // Protected route redirects
-  if (!isLoading) {
-    if ((route === "customer-dashboard") && !isAuthenticated) {
-      return (
-        <div className="min-h-screen bg-slate-950 flex flex-col">
-          <Navbar currentRoute={route} navigate={navigate} />
-          <div className="flex-1 flex items-center justify-center py-8">
-            <LoginPage navigate={navigate} redirect="customer-dashboard" />
-          </div>
-        </div>
-      );
-    }
-
-    if ((route === "admin-dashboard") && (!isAuthenticated || !isStaff)) {
-      return (
-        <div className="min-h-screen bg-slate-950 flex flex-col">
-          <Navbar currentRoute={route} navigate={navigate} />
-          <div className="flex-1 max-w-xl mx-auto my-auto px-4 py-24 text-center">
-            <div className="bg-slate-900 border border-red-500/30 rounded-2xl p-8 shadow-2xl">
-              <h2 className="text-xl font-bold text-white mb-2">Admin Portal Authentication Required</h2>
-              <p className="text-slate-400 text-sm mb-6">
-                You must be authenticated with administrative privileges (ADMIN or TEAM_MEMBER) to access the research control center.
-              </p>
-              <div className="flex gap-4 justify-center">
-                <button
-                  onClick={() => navigate("login", { redirect: "admin-dashboard" })}
-                  className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-medium rounded-xl text-sm transition-all"
-                >
-                  Sign In as Administrator
-                </button>
-                <button
-                  onClick={() => navigate("home")}
-                  className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium rounded-xl text-sm transition-all"
-                >
-                  Return to Home
-                </button>
-              </div>
-            </div>
-          </div>
-          <Footer navigate={navigate} />
-        </div>
-      );
-    }
-  }
-
-  // Render Page Content
   const renderPage = () => {
+    // Account areas wait for the session check so we never flash the sign-in page
+    if ((route === "customer-dashboard" || route === "admin-dashboard" || route === "writer") && isLoading) {
+      return <PageLoader label="Checking your session…" />;
+    }
+
+    if ((route === "customer-dashboard" || route === "writer") && !isAuthenticated) {
+      return <LoginPage navigate={navigate} redirect={route} />;
+    }
+
+    // Writers have their own portal instead of the customer dashboard
+    if (route === "customer-dashboard" && isWriter) {
+      return <WriterPortalPage navigate={navigate} initialTab={params.tab === "profile" ? "profile" : undefined} />;
+    }
+
+    if (route === "admin-dashboard" && (!isAuthenticated || !isStaff)) {
+      return isAuthenticated ? (
+        <div className="container-page section">
+          <div className="card card-pad mx-auto max-w-lg text-center">
+            <h1 className="h-card">Staff access only</h1>
+            <p className="muted mt-2">
+              Your account does not have access to the administration console. If you think this is a mistake, contact
+              your administrator.
+            </p>
+            <button type="button" className="btn-primary mt-6" onClick={() => navigate("customer-dashboard")}>
+              Go to my requests
+            </button>
+          </div>
+        </div>
+      ) : (
+        <LoginPage navigate={navigate} redirect="admin-dashboard" />
+      );
+    }
+
     switch (route) {
       case "home":
         return <HomePage navigate={navigate} />;
       case "services":
-        return <ServicesPage navigate={navigate} initialParams={params} />;
+        return <ServicesPage navigate={navigate} params={params} />;
       case "service-detail":
         return <ServiceDetailPage slug={params.slug || ""} navigate={navigate} />;
+      case "patents":
+        return <PatentsPage navigate={navigate} />;
       case "wizard":
-        return <RequestWizardPage navigate={navigate} initialServiceId={params.serviceId} />;
+        return <RequestWizardPage navigate={navigate} initialService={params.service || params.serviceId} />;
       case "login":
-        return <LoginPage navigate={navigate} redirect={params.redirect} />;
+        return <LoginPage navigate={navigate} redirect={params.redirect} redirectParams={params} />;
       case "register":
-        return <RegisterPage navigate={navigate} />;
+        return <RegisterPage navigate={navigate} redirect={params.redirect} redirectParams={params} />;
       case "customer-dashboard":
         return <CustomerDashboardPage navigate={navigate} initialTab={params.tab} />;
       case "admin-dashboard":
         return <AdminDashboardPage navigate={navigate} initialTab={params.tab} />;
+      case "about":
+        return <AboutPage navigate={navigate} />;
+      case "contact":
+        return <ContactPage navigate={navigate} />;
+      case "privacy":
+        return <LegalPage kind="privacy" navigate={navigate} />;
+      case "terms":
+        return <LegalPage kind="terms" navigate={navigate} />;
+      case "writer":
+        return <WriterPortalPage navigate={navigate} initialTab={params.tab} />;
+      case "experts":
+        return <ExpertsPage navigate={navigate} />;
+      case "join-experts":
+        return <JoinExpertsPage navigate={navigate} />;
       default:
-        return <HomePage navigate={navigate} />;
+        return <NotFoundPage navigate={navigate} />;
     }
   };
 
-  const isAuthPage = route === "login" || route === "register";
-  const isAdminView = route === "admin-dashboard";
-  const showFooter = !isAuthPage && !isAdminView;
-
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-indigo-500/30 selection:text-indigo-200">
-      <Navbar currentRoute={route} navigate={navigate} />
-      <main className={`flex-1 ${isAuthPage ? "flex items-center justify-center py-6 sm:py-10" : ""}`}>
-        {renderPage()}
+    <div className="flex min-h-screen flex-col bg-white">
+      <a
+        href="#main"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[60] focus:rounded-md focus:bg-white focus:px-4 focus:py-2 focus:shadow-lift"
+      >
+        Skip to content
+      </a>
+      {(!isAdminView || !isStaff) && <Navbar currentRoute={route} navigate={navigate} />}
+      <main id="main" className={`flex-1 ${isAuthPage ? "bg-slate-50" : ""}`}>
+        <Suspense fallback={<PageLoader />}>{renderPage()}</Suspense>
       </main>
-      {showFooter && <Footer navigate={navigate} />}
+      {!isAdminView && !isAuthPage && <Footer navigate={navigate} />}
+      {!isAdminView && route !== "wizard" && <WhatsAppButton />}
     </div>
   );
 };

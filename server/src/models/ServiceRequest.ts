@@ -35,6 +35,29 @@ export const isValidStatusTransition = (
     return allowed ? allowed.includes(newStatus) : false;
 };
 
+export const REQUEST_ACTIVITY_TYPES = [
+    "CREATED",
+    "STATUS",
+    "MESSAGE",
+    "QUOTATION",
+    "PAYMENT_SUBMITTED",
+    "PAYMENT_VERIFIED",
+    "PAYMENT_REJECTED",
+    "DELIVERABLE",
+] as const;
+
+export type RequestActivityType = (typeof REQUEST_ACTIVITY_TYPES)[number];
+
+export interface IRequestActivity {
+    type: RequestActivityType;
+    actor: "CUSTOMER" | "STAFF" | "SYSTEM";
+    actorName?: string;
+    message?: string;
+    status?: string;
+    files?: { name: string; url: string }[];
+    createdAt: Date;
+}
+
 export interface IServiceRequest extends Document {
     requestNumber: string;
 
@@ -149,6 +172,8 @@ export interface IServiceRequest extends Document {
     };
 
     assignedTo?: mongoose.Types.ObjectId;
+
+    activity: IRequestActivity[];
 
     createdAt: Date;
     updatedAt: Date;
@@ -329,10 +354,7 @@ const serviceRequestSchema = new Schema<IServiceRequest>(
                 trim: true,
             },
             amountPaid: Number,
-            currency: {
-                type: String,
-                default: "INR",
-            },
+            currency: String,
             payerName: String,
             payerUpiId: String,
             screenshotUrl: String,
@@ -341,7 +363,6 @@ const serviceRequestSchema = new Schema<IServiceRequest>(
             status: {
                 type: String,
                 enum: ["PENDING_VERIFICATION", "VERIFIED", "REJECTED"],
-                default: "PENDING_VERIFICATION",
             },
             verifiedAt: Date,
             adminVerificationNotes: String,
@@ -371,6 +392,32 @@ const serviceRequestSchema = new Schema<IServiceRequest>(
             ref: "User",
             index: true,
         },
+
+        activity: [
+            {
+                type: {
+                    type: String,
+                    enum: REQUEST_ACTIVITY_TYPES,
+                    required: true,
+                },
+                actor: {
+                    type: String,
+                    enum: ["CUSTOMER", "STAFF", "SYSTEM"],
+                    required: true,
+                },
+                actorName: { type: String, trim: true, maxlength: 200 },
+                message: { type: String, trim: true, maxlength: 5000 },
+                status: String,
+                files: [
+                    {
+                        _id: false,
+                        name: { type: String, required: true },
+                        url: { type: String, required: true },
+                    },
+                ],
+                createdAt: { type: Date, default: Date.now },
+            },
+        ],
     },
     {
         timestamps: true,
@@ -389,6 +436,10 @@ serviceRequestSchema.index({
 
 serviceRequestSchema.index({
     "customer.email": 1,
+});
+
+serviceRequestSchema.index({
+    createdAt: -1,
 });
 
 const ServiceRequest = mongoose.model<IServiceRequest>(

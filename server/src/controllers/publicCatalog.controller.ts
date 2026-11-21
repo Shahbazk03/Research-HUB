@@ -1,3 +1,4 @@
+import { safeContainsRegex } from "../utils/requestActivity.js";
 import { Request, Response, NextFunction } from "express";
 import mongoose from "mongoose";
 import Domain from "../models/Domain.js";
@@ -94,7 +95,7 @@ export const getPublicServices = async (
         }
 
         if (search && typeof search === "string" && search.trim()) {
-            const regex = new RegExp(search.trim(), "i");
+            const regex = safeContainsRegex(search);
             filter.$or = [
                 { name: regex },
                 { shortDescription: regex },

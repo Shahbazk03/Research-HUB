@@ -1,6 +1,6 @@
 import jwt from "jsonwebtoken";
 import { env } from "../config/env.js";
-const JWT_SECRET = env.jwtSecret || process.env.JWT_SECRET || "research_hub_secure_default_secret_key_2026";
+const JWT_SECRET = env.jwtSecret;
 export const generateAccessToken = (payload) => {
     return jwt.sign(payload, JWT_SECRET, {
         expiresIn: "7d",

@@ -1,4 +1,4 @@
-export type UserRole = "CUSTOMER" | "TEAM_MEMBER" | "ADMIN";
+export type UserRole = "CUSTOMER" | "TEAM_MEMBER" | "ADMIN" | "WRITER";
 export type UserStatus = "ACTIVE" | "SUSPENDED" | "INACTIVE";
 
 export interface User {
@@ -200,9 +200,50 @@ export interface ServiceRequest {
     currency: string;
     appliedAt?: string;
   };
+  activity?: RequestActivity[];
   createdAt: string;
   updatedAt: string;
 }
+
+export type RequestActivityType =
+  | "CREATED"
+  | "STATUS"
+  | "MESSAGE"
+  | "QUOTATION"
+  | "PAYMENT_SUBMITTED"
+  | "PAYMENT_VERIFIED"
+  | "PAYMENT_REJECTED"
+  | "DELIVERABLE";
+
+export interface RequestActivity {
+  _id?: string;
+  type: RequestActivityType;
+  actor: "CUSTOMER" | "STAFF" | "SYSTEM";
+  actorName?: string;
+  message?: string;
+  status?: ServiceRequestStatus;
+  files?: { name: string; url: string }[];
+  createdAt: string;
+}
+
+/** A payment counts as submitted only when the customer actually sent a reference. */
+export const hasSubmittedPayment = (req?: Pick<ServiceRequest, "paymentSubmission"> | null): boolean =>
+  Boolean(req?.paymentSubmission?.transactionId && req.paymentSubmission.transactionId.trim());
+
+/** Only allow http(s) links to be rendered as clickable hrefs. */
+export const safeHref = (url?: string | null): string | undefined =>
+  url && /^https?:\/\//i.test(url.trim()) ? url.trim() : undefined;
+
+export const STATUS_LABELS: Record<ServiceRequestStatus, string> = {
+  NEW: "Submitted",
+  UNDER_REVIEW: "Under review",
+  QUOTATION_SENT: "Quotation sent",
+  NEEDS_INFORMATION: "Information needed",
+  WAITING_FOR_CUSTOMER: "Awaiting your response",
+  IN_PROGRESS: "In progress",
+  COMPLETED: "Completed",
+  CANCELLED: "Cancelled",
+};
 
 export interface ReferralCode {
   _id: string;

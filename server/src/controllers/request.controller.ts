@@ -9,6 +9,20 @@ import ReferralCode from "../models/ReferralCode.js";
 import { validateAcademicProfileAuthors } from "../utils/requestAuthorValidation.js";
 import { calculateReferralDiscount, normalizeReferralCode } from "../utils/referralValidation.js";
 import { USER_ROLES } from "../types/roles.js";
+import { safeContainsRegex, addActivity, cleanFileList, isSafeHttpUrl } from "../utils/requestActivity.js";
+
+const SERVICE_POPULATE = "name slug description turnaroundTime pricingModel priceRange priceAmount currency";
+
+/** Statuses from which a customer may still cancel (work has not started and nothing is paid). */
+const CUSTOMER_CANCELLABLE: string[] = ["NEW", "UNDER_REVIEW", "QUOTATION_SENT", "WAITING_FOR_CUSTOMER", "NEEDS_INFORMATION"];
+
+const populateForCustomer = (id: unknown) =>
+    ServiceRequest.findById(id)
+        .select("-adminNotes")
+        .populate("serviceId", SERVICE_POPULATE)
+        .populate("domainId", "name slug")
+        .populate("categoryId", "name slug")
+        .lean();
 
 const toStr = (val: unknown): string => (Array.isArray(val) ? String(val[0] || "") : String(val || ""));
 
@@ -48,7 +62,10 @@ export const createServiceRequest = async (
             preferredContactMethod = "WHATSAPP",
         } = req.body;
 
-        const authorValidationError = validateAcademicProfileAuthors(academicProfile);
+        const authorValidationError =
+            academicProfile && typeof academicProfile === "object"
+                ? validateAcademicProfileAuthors(academicProfile)
+                : "Corresponding author and supervisor details are required.";
         if (authorValidationError) {
             res.status(400).json({
                 success: false,
@@ -91,7 +108,15 @@ export const createServiceRequest = async (
         }
 
         // Validate template fields if a template exists
-        let activeTemplateId = templateId;
+        // A client-supplied template is only honoured if it belongs to the selected service
+        let activeTemplateId: mongoose.Types.ObjectId | undefined;
+        if (templateId && mongoose.Types.ObjectId.isValid(templateId)) {
+            const ownTemplate = await RequirementTemplate.findOne({
+                _id: templateId,
+                serviceId: service._id,
+            }).select("_id");
+            if (ownTemplate) activeTemplateId = ownTemplate._id as mongoose.Types.ObjectId;
+        }
         if (!activeTemplateId) {
             const defaultTemplate = await RequirementTemplate.findOne({
                 serviceId: service._id,
@@ -99,11 +124,16 @@ export const createServiceRequest = async (
             }).sort({ isPublished: -1, version: -1 });
 
             if (defaultTemplate) {
-                activeTemplateId = defaultTemplate._id;
+                activeTemplateId = defaultTemplate._id as mongoose.Types.ObjectId;
             }
         }
 
-        if (activeTemplateId && mongoose.Types.ObjectId.isValid(activeTemplateId)) {
+        const requirementValues: Record<string, unknown> =
+            requirements && typeof requirements === "object" && !Array.isArray(requirements)
+                ? requirements
+                : {};
+
+        if (activeTemplateId) {
             const requiredFields = await RequirementField.find({
                 templateId: activeTemplateId,
                 isRequired: true,
@@ -112,7 +142,7 @@ export const createServiceRequest = async (
 
             const missingFields: string[] = [];
             for (const field of requiredFields) {
-                const val = requirements[field.key];
+                const val = requirementValues[field.key];
                 if (val === undefined || val === null || val === "" || (Array.isArray(val) && val.length === 0)) {
                     missingFields.push(field.label);
                 }
@@ -129,20 +159,20 @@ export const createServiceRequest = async (
         }
 
         // Format clean reference files
-        const cleanedFiles = Array.isArray(referenceFiles)
-            ? referenceFiles
-                  .filter((f) => f && typeof f.url === "string" && f.url.trim())
-                  .map((f) => ({
-                      name: String(f.name || "Attachment").trim(),
-                      url: String(f.url).trim(),
-                      type: f.type ? String(f.type).trim() : undefined,
-                      size: typeof f.size === "number" ? f.size : undefined,
-                  }))
-            : [];
+        const cleanedFiles = cleanFileList(referenceFiles);
 
         const requestNumber = generateRequestNumber();
 
         const serviceRequest = await ServiceRequest.create({
+            activity: [
+                {
+                    type: "CREATED",
+                    actor: "CUSTOMER",
+                    actorName: name.trim(),
+                    message: "Request submitted",
+                    createdAt: new Date(),
+                },
+            ],
             requestNumber,
             userId: new mongoose.Types.ObjectId(req.user.userId),
             customer: {
@@ -158,9 +188,9 @@ export const createServiceRequest = async (
             categoryId: categoryId && mongoose.Types.ObjectId.isValid(categoryId)
                 ? new mongoose.Types.ObjectId(categoryId)
                 : service.categoryIds?.[0],
-            templateId: activeTemplateId ? new mongoose.Types.ObjectId(activeTemplateId) : undefined,
-            academicProfile: academicProfile || {},
-            requirements,
+            templateId: activeTemplateId,
+            academicProfile,
+            requirements: requirementValues,
             referenceFiles: cleanedFiles,
             additionalMessage: additionalMessage ? String(additionalMessage).trim() : undefined,
             preferredContactMethod: ["WHATSAPP", "EMAIL", "PHONE"].includes(preferredContactMethod)
@@ -169,11 +199,7 @@ export const createServiceRequest = async (
             status: "NEW",
         });
 
-        const populated = await ServiceRequest.findById(serviceRequest._id)
-            .populate("serviceId", "name slug description turnaroundTime pricingModel priceRange priceAmount")
-            .populate("domainId", "name slug")
-            .populate("categoryId", "name slug")
-            .lean();
+        const populated = await populateForCustomer(serviceRequest._id);
 
         res.status(201).json({
             success: true,
@@ -215,7 +241,7 @@ export const getCustomerServiceRequests = async (
         }
 
         if (search && typeof search === "string" && search.trim()) {
-            const regex = new RegExp(search.trim(), "i");
+            const regex = safeContainsRegex(search);
             filter.$or = [
                 { requestNumber: regex },
                 { "academicProfile.discipline": regex },
@@ -231,7 +257,8 @@ export const getCustomerServiceRequests = async (
 
         const [requests, total] = await Promise.all([
             ServiceRequest.find(filter)
-                .populate("serviceId", "name slug turnaroundTime pricingModel")
+                .select("-adminNotes")
+                .populate("serviceId", SERVICE_POPULATE)
                 .populate("domainId", "name slug")
                 .populate("categoryId", "name slug")
                 .sort({ createdAt: -1 })
@@ -285,6 +312,7 @@ export const getServiceRequestById = async (
         }
 
         const serviceRequest = await ServiceRequest.findOne(query)
+            .select("-adminNotes")
             .populate("serviceId")
             .populate("domainId", "name slug")
             .populate("categoryId", "name slug")
@@ -344,21 +372,32 @@ export const cancelCustomerRequest = async (
             return;
         }
 
-        if (serviceRequest.status === "COMPLETED") {
+        if (
+            !CUSTOMER_CANCELLABLE.includes(serviceRequest.status) ||
+            serviceRequest.paymentSubmission?.status === "VERIFIED"
+        ) {
             res.status(400).json({
                 success: false,
-                message: "Cannot cancel a completed service request",
+                message:
+                    "This request can no longer be cancelled online because work has started or payment is confirmed. Please contact our team.",
             });
             return;
         }
 
         serviceRequest.status = "CANCELLED";
+        addActivity(serviceRequest, {
+            type: "STATUS",
+            actor: "CUSTOMER",
+            actorName: serviceRequest.customer.name,
+            status: "CANCELLED",
+            message: "Request cancelled by customer",
+        });
         await serviceRequest.save();
 
         res.status(200).json({
             success: true,
             message: "Service request cancelled successfully",
-            data: serviceRequest,
+            data: await populateForCustomer(serviceRequest._id),
         });
     } catch (error) {
         next(error);
@@ -380,7 +419,24 @@ export const respondCustomerRequest = async (
         }
 
         const id = toStr(req.params.id);
-        const { message, files } = req.body;
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            res.status(400).json({ success: false, message: "Invalid request ID" });
+            return;
+        }
+
+        const { message, files } = req.body ?? {};
+        const text = typeof message === "string" ? message.trim() : "";
+        const cleanFiles = cleanFileList(files, 10);
+
+        if (!text && cleanFiles.length === 0) {
+            res.status(400).json({ success: false, message: "Please write a message or attach a file" });
+            return;
+        }
+
+        if (text.length > 5000) {
+            res.status(400).json({ success: false, message: "Message must be 5000 characters or fewer" });
+            return;
+        }
 
         const serviceRequest = await ServiceRequest.findOne({
             _id: id,
@@ -395,14 +451,16 @@ export const respondCustomerRequest = async (
             return;
         }
 
-        if (message) {
-            serviceRequest.additionalMessage = serviceRequest.additionalMessage
-                ? `${serviceRequest.additionalMessage}\n\n[Customer Update ${new Date().toISOString()}]: ${message}`
-                : message;
-        }
+        addActivity(serviceRequest, {
+            type: "MESSAGE",
+            actor: "CUSTOMER",
+            actorName: serviceRequest.customer.name,
+            message: text || undefined,
+            files: cleanFiles.map((f) => ({ name: f.name, url: f.url })),
+        });
 
-        if (Array.isArray(files) && files.length > 0) {
-            serviceRequest.referenceFiles.push(...files);
+        if (cleanFiles.length > 0) {
+            serviceRequest.referenceFiles.push(...cleanFiles);
         }
 
         // When customer responds, move status back to IN_PROGRESS if it was waiting
@@ -415,7 +473,7 @@ export const respondCustomerRequest = async (
         res.status(200).json({
             success: true,
             message: "Response submitted successfully",
-            data: serviceRequest,
+            data: await populateForCustomer(serviceRequest._id),
         });
     } catch (error) {
         next(error);
@@ -456,6 +514,11 @@ export const submitCustomerPayment = async (
             return;
         }
 
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            res.status(400).json({ success: false, message: "Invalid request ID" });
+            return;
+        }
+
         const serviceRequest = await ServiceRequest.findOne({
             _id: id,
             userId: new mongoose.Types.ObjectId(req.user.userId),
@@ -466,6 +529,24 @@ export const submitCustomerPayment = async (
                 success: false,
                 message: "Service request not found",
             });
+            return;
+        }
+
+        if (["CANCELLED", "COMPLETED"].includes(serviceRequest.status)) {
+            res.status(400).json({ success: false, message: "Payments cannot be submitted for a closed request" });
+            return;
+        }
+
+        if (!(Number(serviceRequest.quotation?.amount) > 0)) {
+            res.status(400).json({
+                success: false,
+                message: "A quotation has not been issued for this request yet",
+            });
+            return;
+        }
+
+        if (serviceRequest.paymentSubmission?.status === "VERIFIED") {
+            res.status(400).json({ success: false, message: "Payment for this request is already confirmed" });
             return;
         }
 
@@ -508,7 +589,7 @@ export const submitCustomerPayment = async (
 
         const paymentAmount = referralPayload
             ? referralPayload.finalAmount
-            : Number(amountPaid) || (serviceRequest.quotation?.amount || 0);
+            : Number(serviceRequest.quotation?.amount) || Number(amountPaid) || 0;
 
         serviceRequest.referral = referralPayload;
         serviceRequest.paymentSubmission = {
@@ -517,18 +598,25 @@ export const submitCustomerPayment = async (
             currency: currency || serviceRequest.quotation?.currency || "INR",
             payerName: payerName ? String(payerName).trim() : serviceRequest.customer.name,
             payerUpiId: payerUpiId ? String(payerUpiId).trim() : "",
-            screenshotUrl: screenshotUrl || "",
-            notes: notes || "",
+            screenshotUrl: isSafeHttpUrl(screenshotUrl) ? screenshotUrl.trim() : "",
+            notes: notes ? String(notes).trim().slice(0, 2000) : "",
             submittedAt: new Date(),
             status: "PENDING_VERIFICATION",
         };
+
+        addActivity(serviceRequest, {
+            type: "PAYMENT_SUBMITTED",
+            actor: "CUSTOMER",
+            actorName: serviceRequest.customer.name,
+            message: `Payment reference ${transactionId.trim()} submitted for verification`,
+        });
 
         await serviceRequest.save();
 
         res.status(200).json({
             success: true,
             message: "Payment details submitted for verification",
-            data: serviceRequest,
+            data: await populateForCustomer(serviceRequest._id),
         });
     } catch (error) {
         next(error);

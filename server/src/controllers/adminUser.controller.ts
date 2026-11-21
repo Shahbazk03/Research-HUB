@@ -1,3 +1,4 @@
+import { safeContainsRegex } from "../utils/requestActivity.js";
 import { Request, Response, NextFunction } from "express";
 import bcrypt from "bcryptjs";
 import User from "../models/User.js";
@@ -22,7 +23,7 @@ export const getAdminUsers = async (
         }
 
         if (search && typeof search === "string" && search.trim()) {
-            const regex = new RegExp(search.trim(), "i");
+            const regex = safeContainsRegex(search);
             filter.$or = [
                 { email: regex },
                 { firstName: regex },

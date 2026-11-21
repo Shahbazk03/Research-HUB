@@ -3,6 +3,20 @@ export declare const SERVICE_REQUEST_STATUSES: readonly ["NEW", "IN_PROGRESS", "
 export type ServiceRequestStatus = (typeof SERVICE_REQUEST_STATUSES)[number];
 export declare const VALID_STATUS_TRANSITIONS: Record<ServiceRequestStatus, ServiceRequestStatus[]>;
 export declare const isValidStatusTransition: (currentStatus: ServiceRequestStatus, newStatus: ServiceRequestStatus) => boolean;
+export declare const REQUEST_ACTIVITY_TYPES: readonly ["CREATED", "STATUS", "MESSAGE", "QUOTATION", "PAYMENT_SUBMITTED", "PAYMENT_VERIFIED", "PAYMENT_REJECTED", "DELIVERABLE"];
+export type RequestActivityType = (typeof REQUEST_ACTIVITY_TYPES)[number];
+export interface IRequestActivity {
+    type: RequestActivityType;
+    actor: "CUSTOMER" | "STAFF" | "SYSTEM";
+    actorName?: string;
+    message?: string;
+    status?: string;
+    files?: {
+        name: string;
+        url: string;
+    }[];
+    createdAt: Date;
+}
 export interface IServiceRequest extends Document {
     requestNumber: string;
     userId?: mongoose.Types.ObjectId;
@@ -101,6 +115,7 @@ export interface IServiceRequest extends Document {
         appliedAt: Date;
     };
     assignedTo?: mongoose.Types.ObjectId;
+    activity: IRequestActivity[];
     createdAt: Date;
     updatedAt: Date;
 }

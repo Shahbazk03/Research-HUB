@@ -1,184 +1,134 @@
 import React, { useState } from "react";
-import { UserPlus, GraduationCap, AlertCircle, ArrowRight, Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
+import { AppLink, Field, Spinner, useDocumentTitle } from "../components/ui";
+import { AuthLayout, resolveRedirect } from "./AuthLayout";
+import { Navigate, RouteParams } from "../router";
 
-interface RegisterPageProps {
-  navigate: (route: string, params?: any) => void;
-}
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-export const RegisterPage: React.FC<RegisterPageProps> = ({ navigate }) => {
+export const RegisterPage: React.FC<{ navigate: Navigate; redirect?: string; redirectParams?: RouteParams }> = ({
+  navigate,
+  redirect,
+}) => {
+  useDocumentTitle("Create an account");
   const { register } = useAuth();
+  const [form, setForm] = useState({ firstName: "", lastName: "", email: "", phone: "", institution: "", password: "" });
   const [showPassword, setShowPassword] = useState(false);
-  const [formData, setFormData] = useState({
-    firstName: "",
-    lastName: "",
-    email: "",
-    password: "",
-    phone: "",
-    institution: "",
-    department: "",
-  });
-  const [isLoading, setIsLoading] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const next: Record<string, string> = {};
+    if (!form.firstName.trim()) next.firstName = "Please enter your first name.";
+    if (!EMAIL_RE.test(form.email.trim())) next.email = "Enter a valid email address.";
+    if (form.password.length < 8) next.password = "Use at least 8 characters.";
+    setErrors(next);
+    if (Object.keys(next).length) return;
+
     setError(null);
-    setIsLoading(true);
-
-    const res = await register(formData);
-    setIsLoading(false);
-
-    if (res.success) {
-      navigate("customer-dashboard");
-    } else {
-      setError(res.message || "Registration failed.");
+    setLoading(true);
+    const result = await register({
+      firstName: form.firstName.trim(),
+      lastName: form.lastName.trim() || undefined,
+      email: form.email.trim(),
+      phone: form.phone.trim() || undefined,
+      institution: form.institution.trim() || undefined,
+      password: form.password,
+    });
+    setLoading(false);
+    if (!result.success) {
+      setError(result.message || "We couldn't create your account. Please try again.");
+      return;
     }
+    const target = resolveRedirect(redirect, "CUSTOMER");
+    navigate(target.route, target.params);
   };
 
   return (
-    <div className="w-full max-w-md mx-auto px-4 py-4 sm:py-6">
-      <div className="glass-panel p-5 sm:p-10 rounded-3xl border-slate-800 space-y-6 shadow-2xl shadow-indigo-950/40">
-        <div className="text-center space-y-2">
-          <div className="w-12 h-12 rounded-2xl bg-indigo-600 flex items-center justify-center mx-auto shadow-lg shadow-indigo-600/30">
-            <GraduationCap className="w-6 h-6 text-white" />
-          </div>
-          <h1 className="text-2xl font-extrabold text-white tracking-tight">
-            Create Scholar Account
-          </h1>
-          <p className="text-xs text-slate-400">
-            Track research milestones, submit dynamic requests, and access advisory records.
-          </p>
-        </div>
-
+    <AuthLayout
+      title="Create your account"
+      subtitle={
+        <>
+          Already have an account?{" "}
+          <AppLink to="login" params={{ redirect }} navigate={navigate} className="link">
+            Sign in
+          </AppLink>
+        </>
+      }
+    >
+      <form onSubmit={onSubmit} className="space-y-5" noValidate>
         {error && (
-          <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-start gap-2">
-            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-            <span>{error}</span>
+          <div className="alert-error" role="alert">
+            {error}
           </div>
         )}
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                First Name *
-              </label>
-              <input
-                type="text"
-                required
-                placeholder="Aarav"
-                value={formData.firstName}
-                onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
-                className="w-full p-2.5 rounded-xl glass-input text-xs text-white"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                Last Name
-              </label>
-              <input
-                type="text"
-                placeholder="Patel"
-                value={formData.lastName}
-                onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
-                className="w-full p-2.5 rounded-xl glass-input text-xs text-white"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-              Email Address *
-            </label>
-            <input
-              type="email"
-              required
-              placeholder="scholar@university.edu"
-              value={formData.email}
-              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              className="w-full p-2.5 rounded-xl glass-input text-xs text-white"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-              Password (min. 8 characters) *
-            </label>
+        <div className="grid gap-5 sm:grid-cols-2">
+          <Field label="First name" required error={errors.firstName}>
+            {(id, d) => <input id={id} aria-describedby={d} autoComplete="given-name" className={`input ${errors.firstName ? "input-error" : ""}`} value={form.firstName} onChange={set("firstName")} />}
+          </Field>
+          <Field label="Last name">
+            {(id) => <input id={id} autoComplete="family-name" className="input" value={form.lastName} onChange={set("lastName")} />}
+          </Field>
+        </div>
+        <Field label="Email address" required error={errors.email}>
+          {(id, d) => <input id={id} aria-describedby={d} type="email" autoComplete="email" className={`input ${errors.email ? "input-error" : ""}`} value={form.email} onChange={set("email")} />}
+        </Field>
+        <Field label="WhatsApp / phone" help="Optional. Include the country code.">
+          {(id, d) => <input id={id} aria-describedby={d} type="tel" autoComplete="tel" className="input" value={form.phone} onChange={set("phone")} />}
+        </Field>
+        <Field label="Institution or organisation">
+          {(id) => <input id={id} autoComplete="organization" className="input" value={form.institution} onChange={set("institution")} />}
+        </Field>
+        <Field label="Password" required error={errors.password} help="At least 8 characters.">
+          {(id, d) => (
             <div className="relative">
               <input
+                id={id}
+                aria-describedby={d}
                 type={showPassword ? "text" : "password"}
-                required
-                minLength={6}
-                placeholder="••••••••"
-                value={formData.password}
-                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                className="w-full p-2.5 pr-10 rounded-xl glass-input text-xs text-white"
+                autoComplete="new-password"
+                minLength={8}
+                className={`input pr-11 ${errors.password ? "input-error" : ""}`}
+                value={form.password}
+                onChange={set("password")}
               />
               <button
                 type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white transition-colors"
-                tabIndex={-1}
+                onClick={() => setShowPassword((s) => !s)}
+                className="icon-btn absolute right-1 top-1/2 -translate-y-1/2"
+                aria-label={showPassword ? "Hide password" : "Show password"}
               >
-                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
             </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-              WhatsApp / Mobile Number
-            </label>
-            <input
-              type="tel"
-              placeholder="+91 9876543210"
-              value={formData.phone}
-              onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-              className="w-full p-2.5 rounded-xl glass-input text-xs text-white"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-              University / Institution (Optional)
-            </label>
-            <input
-              type="text"
-              placeholder="e.g. Cambridge / IIT Bombay"
-              value={formData.institution}
-              onChange={(e) => setFormData({ ...formData, institution: e.target.value })}
-              className="w-full p-2.5 rounded-xl glass-input text-xs text-white"
-            />
-          </div>
-
-          <button
-            type="submit"
-            disabled={isLoading}
-            className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50"
-          >
-            {isLoading ? (
-              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-            ) : (
-              <>
-                <UserPlus className="w-4 h-4" />
-                <span>Create Account</span>
-              </>
-            )}
-          </button>
-        </form>
-
-        <div className="text-center pt-2 border-t border-slate-800/80 text-xs text-slate-400">
-          <span>Already have an account? </span>
-          <button
-            onClick={() => navigate("login")}
-            className="text-indigo-400 hover:text-indigo-300 font-semibold inline-flex items-center gap-1"
-          >
-            <span>Sign in</span>
-            <ArrowRight className="w-3 h-3" />
-          </button>
-        </div>
-      </div>
-    </div>
+          )}
+        </Field>
+        <button type="submit" className="btn-primary btn-lg w-full" disabled={loading}>
+          {loading ? (
+            <>
+              <Spinner /> Creating account…
+            </>
+          ) : (
+            "Create account"
+          )}
+        </button>
+        <p className="text-center text-xs text-slate-500">
+          By creating an account you agree to our{" "}
+          <AppLink to="terms" navigate={navigate} className="link">
+            terms
+          </AppLink>{" "}
+          and{" "}
+          <AppLink to="privacy" navigate={navigate} className="link">
+            privacy policy
+          </AppLink>
+          .
+        </p>
+      </form>
+    </AuthLayout>
   );
 };

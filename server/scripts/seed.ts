@@ -19,6 +19,20 @@ if (!DATABASE_URL) {
     throw new Error("DATABASE_URL is not configured in .env");
 }
 
+/*
+| WARNING: this script DELETES and re-creates the whole catalogue (settings,
+| reference data, domains, categories, services, templates, fields, FAQs).
+| Existing requests keep pointing at the deleted ids. It refuses to run unless
+| --confirm-wipe is passed, and never with NODE_ENV=production.
+| To add the patent & IP services without wiping anything, use seed-ip-services.ts.
+*/
+if (!process.argv.includes("--confirm-wipe") || process.env.NODE_ENV === "production") {
+    console.error(
+        "Refusing to run: seed.ts wipes the catalogue. Re-run with --confirm-wipe against a non-production database."
+    );
+    process.exit(1);
+}
+
 async function seedDatabase(): Promise<void> {
     try {
         console.log("Connecting to MongoDB Atlas...");
@@ -546,8 +560,11 @@ async function seedDatabase(): Promise<void> {
 
         // 8. Admin User
         console.log("Verifying / Creating Admin Account...");
-        const adminEmail = process.env.ADMIN_EMAIL || "shahbaz@example.com";
-        const adminPassword = process.env.ADMIN_PASSWORD || "admin123";
+        const adminEmail = (process.env.ADMIN_EMAIL || "").trim().toLowerCase();
+        const adminPassword = process.env.ADMIN_PASSWORD || "";
+        if (!adminEmail || adminPassword.length < 12) {
+            throw new Error("Set ADMIN_EMAIL and an ADMIN_PASSWORD of at least 12 characters before seeding.");
+        }
         const passwordHash = await bcrypt.hash(adminPassword, 12);
 
         await User.findOneAndUpdate(
@@ -569,7 +586,7 @@ async function seedDatabase(): Promise<void> {
 
         console.log("✅ Seed completed successfully!");
         console.log(`Admin Email: ${adminEmail}`);
-        console.log(`Admin Password: ${adminPassword}`);
+        console.log("Admin Password: (value of ADMIN_PASSWORD)");
     } catch (error) {
         console.error("❌ Seed failed:", error);
         process.exitCode = 1;

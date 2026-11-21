@@ -12,6 +12,16 @@ import {
   ReferralCode,
 } from "./types";
 
+export type UploadFolder =
+  | "qrcodes"
+  | "payments"
+  | "deliverables"
+  | "references"
+  | "messages"
+  | "writer-cv"
+  | "writer-photos"
+  | "writer-submissions";
+
 // Public APIs
 export const getPublicDomains = async (): Promise<Domain[]> => {
   const res = await apiClient.get("/domains");
@@ -74,11 +84,13 @@ export const getCustomerRequests = async (params?: {
   status?: string;
   search?: string;
   page?: number;
+  limit?: number;
 }): Promise<{ data: ServiceRequest[]; total: number; page: number; totalPages: number }> => {
   const query = new URLSearchParams();
   if (params?.status) query.set("status", params.status);
   if (params?.search) query.set("search", params.search);
   if (params?.page) query.set("page", String(params.page));
+  if (params?.limit) query.set("limit", String(params.limit));
   const res = await apiClient.get(`/requests?${query.toString()}`);
   return res.data;
 };
@@ -93,8 +105,12 @@ export const cancelCustomerRequest = async (id: string): Promise<ServiceRequest>
   return res.data.data;
 };
 
-export const respondCustomerRequest = async (id: string, message: string): Promise<ServiceRequest> => {
-  const res = await apiClient.patch(`/requests/${id}/respond`, { message });
+export const respondCustomerRequest = async (
+  id: string,
+  message: string,
+  files: { name: string; url: string }[] = []
+): Promise<ServiceRequest> => {
+  const res = await apiClient.patch(`/requests/${id}/respond`, { message, files });
   return res.data.data;
 };
 
@@ -123,7 +139,7 @@ export const validateReferralCode = async (id: string, payload: { code: string; 
 export const uploadAsset = async (payload: {
   filename: string;
   base64Data: string;
-  folder?: "qrcodes" | "payments" | "deliverables" | "references" | "files";
+  folder?: UploadFolder;
 }): Promise<{ url: string; fileName: string; size: number }> => {
   const res = await apiClient.post("/upload", payload);
   return res.data;
@@ -300,3 +316,31 @@ export const updateAdminFaq = async (id: string, payload: any): Promise<CmsFaq> 
 export const deleteAdminFaq = async (id: string): Promise<void> => {
   await apiClient.delete(`/admin/cms/faqs/${id}`);
 };
+
+/** Extract the most useful human-readable message from an API error. */
+export const getErrorMessage = (err: unknown, fallback = "Something went wrong. Please try again."): string => {
+  const anyErr = err as any;
+  return anyErr?.response?.data?.message || (anyErr?.code === "ERR_NETWORK" ? "We could not reach the server. Please check your connection and try again." : anyErr?.message) || fallback;
+};
+
+/** Read a File as a data URL and upload it. Rejects files over 10 MB before sending. */
+export const uploadFile = (
+  file: File,
+  folder: UploadFolder
+): Promise<{ url: string; fileName: string; size: number }> =>
+  new Promise((resolve, reject) => {
+    if (file.size > 10 * 1024 * 1024) {
+      reject(new Error("Files must be 10 MB or smaller."));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Could not read the selected file."));
+    reader.onload = async () => {
+      try {
+        resolve(await uploadAsset({ filename: file.name, base64Data: String(reader.result), folder }));
+      } catch (e) {
+        reject(new Error(getErrorMessage(e, "Upload failed.")));
+      }
+    };
+    reader.readAsDataURL(file);
+  });

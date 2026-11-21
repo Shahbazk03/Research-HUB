@@ -10,6 +10,7 @@ import requestRoutes from "./routes/request.routes.js";
 import adminRoutes from "./routes/admin.routes.js";
 import publicRoutes from "./routes/public.routes.js";
 import uploadRoutes from "./routes/upload.routes.js";
+import writerRoutes from "./routes/writer.routes.js";
 const app = express();
 // Required when app runs behind Render/Vercel reverse proxy so X-Forwarded-* headers are trusted
 app.set("trust proxy", 1);
@@ -52,6 +53,21 @@ const limiter = rateLimit({
     },
 });
 app.use("/api", limiter);
+// Strict limiter for credential endpoints to slow down password guessing
+const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 20,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skipSuccessfulRequests: true,
+    message: {
+        success: false,
+        message: "Too many sign-in attempts. Please wait 15 minutes and try again.",
+    },
+});
+app.use("/api/auth/login", authLimiter);
+app.use("/api/auth/register", authLimiter);
+app.use("/api/auth/register-writer", authLimiter);
 // Body parsers
 app.use(express.json({ limit: "15mb" }));
 app.use(express.urlencoded({ extended: true, limit: "15mb" }));
@@ -66,6 +82,8 @@ app.use("/api/health", healthRoutes);
 app.use("/api/auth", authRoutes);
 // Customer Service Requests
 app.use("/api/requests", requestRoutes);
+// Research writer portal
+app.use("/api/writer", writerRoutes);
 // Admin Portal Routes
 app.use("/api/admin", adminRoutes);
 // Public Catalog, Reference Data, Settings & CMS
@@ -73,7 +91,15 @@ app.use("/api", publicRoutes);
 // File & Asset Uploads (QR codes, Deliverables, Payment receipts)
 app.use("/api/upload", uploadRoutes);
 // Static uploads serving
-app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
+app.use("/uploads", express.static(path.join(process.cwd(), "uploads"), {
+    dotfiles: "deny",
+    index: false,
+    setHeaders: (res) => {
+        // Uploaded files are data, never active content
+        res.setHeader("X-Content-Type-Options", "nosniff");
+        res.setHeader("Content-Security-Policy", "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox");
+    },
+}));
 // API Root info
 app.get("/api", (_req, res) => {
     res.status(200).json({
@@ -117,6 +143,14 @@ app.use((error, _req, res, _next) => {
             });
             return;
         }
+        // Handle malformed ids / values
+        if (error.name === "CastError") {
+            res.status(400).json({
+                success: false,
+                message: "Invalid identifier or value supplied",
+            });
+            return;
+        }
         // Handle Mongoose validation errors
         if (error.name === "ValidationError") {
             res.status(400).json({
@@ -135,7 +169,7 @@ app.use((error, _req, res, _next) => {
         }
         res.status(500).json({
             success: false,
-            message: error.message || "Internal server error",
+            message: process.env.NODE_ENV === "production" ? "Internal server error" : error.message || "Internal server error",
         });
         return;
     }

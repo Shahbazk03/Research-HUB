@@ -14,8 +14,14 @@ if (!DATABASE_URL) {
     throw new Error("DATABASE_URL is not configured in .env");
 }
 
-const ADMIN_EMAIL = "shahbaz@example.com";
-const ADMIN_PASSWORD = "admin123";
+const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || "").trim().toLowerCase();
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";
+
+if (!ADMIN_EMAIL || ADMIN_PASSWORD.length < 12) {
+    throw new Error(
+        "Set ADMIN_EMAIL and an ADMIN_PASSWORD of at least 12 characters in the environment before running this script."
+    );
+}
 
 async function createOrResetAdmin(): Promise<void> {
     try {
@@ -59,7 +65,7 @@ async function createOrResetAdmin(): Promise<void> {
 
         console.log("");
         console.log("Email:", ADMIN_EMAIL);
-        console.log("Password:", ADMIN_PASSWORD);
+        console.log("Password: (value of ADMIN_PASSWORD)");
         console.log("Role:", USER_ROLES.ADMIN);
         console.log("Status:", USER_STATUSES.ACTIVE);
         console.log("");

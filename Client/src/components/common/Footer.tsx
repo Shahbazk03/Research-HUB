@@ -1,206 +1,128 @@
 import React from "react";
-import { GraduationCap, ShieldCheck, Mail, Phone, Clock, FileCheck2, ArrowUpRight } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
-import { getPublicSettings } from "../../api";
-import { WhatsAppButton } from "./WhatsAppButton";
+import { Clock, Mail, MessageCircle, Phone } from "lucide-react";
+import { AppLink } from "../ui";
+import { Logo } from "./Navbar";
+import { Navigate, RouteParams, RouteType } from "../../router";
+import { useSettings, whatsappLink } from "../../hooks/usePublicData";
 
-interface FooterProps {
-  navigate: (route: string, params?: any) => void;
-}
+const formatPhone = (raw?: string) => {
+  const digits = (raw || "").replace(/\D/g, "");
+  if (!digits) return "";
+  if (digits.length === 12 && digits.startsWith("91")) return `+91 ${digits.slice(2, 7)} ${digits.slice(7)}`;
+  return raw?.startsWith("+") ? raw : `+${digits}`;
+};
 
-export const Footer: React.FC<FooterProps> = ({ navigate }) => {
-  const { data: settings } = useQuery({
-    queryKey: ["site-settings"],
-    queryFn: getPublicSettings,
-  });
+type LinkItem = { label: string; to: RouteType; params?: RouteParams };
+
+const COLUMNS: { title: string; links: LinkItem[] }[] = [
+  {
+    title: "Research & Publication",
+    links: [
+      { label: "All services", to: "services" },
+      { label: "Research papers", to: "services", params: { search: "paper" } },
+      { label: "Thesis & dissertation", to: "services", params: { search: "thesis" } },
+      { label: "Editing & proofreading", to: "services", params: { search: "editing" } },
+    ],
+  },
+  {
+    title: "Patents & IP",
+    links: [
+      { label: "Patent search & drafting", to: "patents" },
+      { label: "Patent filing support", to: "service-detail", params: { slug: "patent-filing-support" } },
+      { label: "Design registration", to: "service-detail", params: { slug: "design-registration" } },
+      { label: "Trademark & copyright", to: "service-detail", params: { slug: "trademark-registration" } },
+    ],
+  },
+  {
+    title: "Company",
+    links: [
+      { label: "About us", to: "about" },
+      { label: "Contact", to: "contact" },
+      { label: "Start a request", to: "wizard" },
+      { label: "Our experts", to: "experts" },
+      { label: "Join as an expert", to: "join-experts" },
+      { label: "Client sign in", to: "login" },
+    ],
+  },
+];
+
+export const Footer: React.FC<{ navigate: Navigate }> = ({ navigate }) => {
+  const { data: settings } = useSettings();
+  const phone = formatPhone(settings?.supportPhone || settings?.whatsappNumber);
+  const wa = whatsappLink(settings?.whatsappNumber);
+  const year = new Date().getFullYear();
 
   return (
-    <footer className="border-t border-slate-800/80 bg-slate-950 text-slate-400 text-sm">
-      {/* Top Banner / Trust Bar */}
-      <div className="border-b border-slate-800/60 bg-slate-900/40 py-8">
-        <div className="w-full max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-center md:text-left">
-            <div className="flex items-center justify-center md:justify-start gap-3">
-              <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
-                <ShieldCheck className="w-5 h-5" />
-              </div>
-              <div>
-                <p className="text-white font-medium text-sm">COPE Compliance & Ethics</p>
-                <p className="text-xs text-slate-400">Strict anti-plagiarism & original research standards</p>
-              </div>
-            </div>
+    <footer className="bg-navy-950 text-navy-100">
+      <div className="container-page grid gap-12 py-14 lg:grid-cols-[1.3fr_2fr] lg:py-16">
+        <div>
+          <Logo navigate={navigate} inverted />
+          <p className="mt-5 max-w-sm text-sm leading-relaxed text-navy-200">
+            {settings?.description ||
+              "Research publication, thesis and patent & intellectual property services for researchers, universities and innovators."}
+          </p>
+          <ul className="mt-6 space-y-3 text-sm">
+            {settings?.supportEmail && (
+              <li className="flex items-center gap-3">
+                <Mail className="h-4 w-4 text-accent-300" />
+                <a href={`mailto:${settings.supportEmail}`} className="hover:text-white">
+                  {settings.supportEmail}
+                </a>
+              </li>
+            )}
+            {phone && (
+              <li className="flex items-center gap-3">
+                <Phone className="h-4 w-4 text-accent-300" />
+                <a href={`tel:${phone.replace(/[^\d+]/g, "")}`} className="hover:text-white">
+                  {phone}
+                </a>
+              </li>
+            )}
+            {wa && (
+              <li className="flex items-center gap-3">
+                <MessageCircle className="h-4 w-4 text-accent-300" />
+                <a href={wa} target="_blank" rel="noopener noreferrer" className="hover:text-white">
+                  WhatsApp
+                </a>
+              </li>
+            )}
+            {settings?.businessHours && (
+              <li className="flex items-center gap-3">
+                <Clock className="h-4 w-4 text-accent-300" />
+                <span>{settings.businessHours}</span>
+              </li>
+            )}
+          </ul>
+        </div>
 
-            <div className="flex items-center justify-center md:justify-start gap-3">
-              <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
-                <FileCheck2 className="w-5 h-5" />
-              </div>
-              <div>
-                <p className="text-white font-medium text-sm">Target Journal Formatting</p>
-                <p className="text-xs text-slate-400">IEEE, Elsevier, Springer, Nature & UGC formats</p>
-              </div>
+        <div className="grid gap-10 sm:grid-cols-3">
+          {COLUMNS.map((col) => (
+            <div key={col.title}>
+              <h2 className="text-xs font-semibold uppercase tracking-[0.05em] text-white">{col.title}</h2>
+              <ul className="mt-4 space-y-3 text-sm">
+                {col.links.map((link) => (
+                  <li key={link.label}>
+                    <AppLink to={link.to} params={link.params} navigate={navigate} className="text-navy-200 hover:text-white">
+                      {link.label}
+                    </AppLink>
+                  </li>
+                ))}
+              </ul>
             </div>
-
-            <div className="flex items-center justify-center md:justify-start gap-3">
-              <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400">
-                <Clock className="w-5 h-5" />
-              </div>
-              <div>
-                <p className="text-white font-medium text-sm">Milestone-Based Delivery</p>
-                <p className="text-xs text-slate-400">Prompt turnaround with direct WhatsApp collaboration</p>
-              </div>
-            </div>
-          </div>
+          ))}
         </div>
       </div>
 
-      {/* Main Footer Links */}
-      <div className="w-full max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-12 lg:py-16">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-8 lg:gap-12">
-          {/* Col 1: Platform & Branding */}
-          <div className="lg:col-span-2 space-y-4">
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center shadow-md shadow-indigo-600/30">
-                <GraduationCap className="w-4 h-4 text-white" />
-              </div>
-              <span className="text-lg font-bold text-white tracking-tight">
-                Research<span className="text-indigo-400">Hub</span>
-              </span>
-            </div>
-            <p className="text-sm text-slate-400 leading-relaxed max-w-sm">
-              {settings?.description ||
-                "A premier academic research consultation and publication platform supporting undergraduate, doctoral scholars, and faculty worldwide."}
-            </p>
-            <div className="pt-2 flex flex-wrap gap-3">
-              <WhatsAppButton size="sm" />
-            </div>
-          </div>
-
-          {/* Col 2: Services */}
-          <div>
-            <h4 className="text-xs font-semibold text-slate-200 tracking-wider uppercase mb-4">
-              Core Services
-            </h4>
-            <ul className="space-y-2.5 text-xs sm:text-sm">
-              <li>
-                <button onClick={() => navigate("services")} className="hover:text-white transition-colors">
-                  Research Paper Writing
-                </button>
-              </li>
-              <li>
-                <button onClick={() => navigate("services")} className="hover:text-white transition-colors">
-                  Ph.D. Thesis Consulting
-                </button>
-              </li>
-              <li>
-                <button onClick={() => navigate("services")} className="hover:text-white transition-colors">
-                  PRISMA Systematic Reviews
-                </button>
-              </li>
-              <li>
-                <button onClick={() => navigate("services")} className="hover:text-white transition-colors">
-                  Algorithm Implementation
-                </button>
-              </li>
-              <li>
-                <button onClick={() => navigate("services")} className="hover:text-white transition-colors">
-                  Turnitin & Proofreading
-                </button>
-              </li>
-            </ul>
-          </div>
-
-          {/* Col 3: Disciplines */}
-          <div>
-            <h4 className="text-xs font-semibold text-slate-200 tracking-wider uppercase mb-4">
-              Disciplines
-            </h4>
-            <ul className="space-y-2.5 text-xs sm:text-sm">
-              <li>
-                <button onClick={() => navigate("services")} className="hover:text-white transition-colors">
-                  Computer Science & AI
-                </button>
-              </li>
-              <li>
-                <button onClick={() => navigate("services")} className="hover:text-white transition-colors">
-                  Medical & Clinical Sciences
-                </button>
-              </li>
-              <li>
-                <button onClick={() => navigate("services")} className="hover:text-white transition-colors">
-                  Engineering & Robotics
-                </button>
-              </li>
-              <li>
-                <button onClick={() => navigate("services")} className="hover:text-white transition-colors">
-                  Management & Business
-                </button>
-              </li>
-              <li>
-                <button onClick={() => navigate("services")} className="hover:text-white transition-colors">
-                  Law & Comparative Policy
-                </button>
-              </li>
-            </ul>
-          </div>
-
-          {/* Col 4: Contact & Support */}
-          <div>
-            <h4 className="text-xs font-semibold text-slate-200 tracking-wider uppercase mb-4">
-              Direct Inquiries
-            </h4>
-            <div className="space-y-3 text-xs sm:text-sm">
-              <div className="flex items-start gap-2.5">
-                <Mail className="w-4 h-4 text-indigo-400 mt-0.5 shrink-0" />
-                <span className="text-slate-300 select-all">
-                  {settings?.supportEmail || "support@researchhub.com"}
-                </span>
-              </div>
-              <div className="flex items-start gap-2.5">
-                <Phone className="w-4 h-4 text-emerald-400 mt-0.5 shrink-0" />
-                {(() => {
-                  const phoneText =
-                    settings?.supportPhone && !settings.supportPhone.includes("7905632280")
-                      ? settings.supportPhone
-                      : settings?.whatsappNumber
-                      ? settings.whatsappNumber.startsWith("91") && settings.whatsappNumber.length === 12
-                        ? `+91 ${settings.whatsappNumber.slice(2)}`
-                        : `+${settings.whatsappNumber}`
-                      : "+91 8004153053";
-
-                  return (
-                    <a
-                      href={`tel:${phoneText.replace(/[^0-9+]/g, "")}`}
-                      className="text-slate-300 hover:text-emerald-400 transition-colors select-all"
-                    >
-                      {phoneText}
-                    </a>
-                  );
-                })()}
-              </div>
-              <div className="flex items-start gap-2.5">
-                <Clock className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
-                <span className="text-slate-400 text-xs">
-                  {settings?.businessHours || "Mon - Sat: 9:00 AM - 8:30 PM IST"}
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Ethical Disclaimer */}
-        <div className="mt-12 pt-8 border-t border-slate-900 text-xs text-slate-500 space-y-3">
-          <p className="leading-relaxed">
-            <strong className="text-slate-400">Academic Integrity Notice:</strong>{" "}
-            {settings?.disclaimer ||
-              "Research Hub provides ethical research consultation, technical writing guidance, proofreading, and journal formatting services. We strictly adhere to academic integrity standards and do not guarantee publication acceptance without editorial review."}
-          </p>
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4 border-t border-slate-900/60 text-slate-500 text-[11px] text-center sm:text-left">
-            <p>© {new Date().getFullYear()} Research Hub Academic Network. All rights reserved.</p>
-            <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-4">
-              <span>Committee on Publication Ethics (COPE) Compliant</span>
-              <span className="text-slate-600 hidden sm:inline">•</span>
-              <span>Zero-Plagiarism Guarantee</span>
-            </div>
+      <div className="border-t border-white/10">
+        <div className="container-page flex flex-col gap-3 py-6 text-xs text-navy-300 sm:flex-row sm:items-center sm:justify-between">
+          <p>© {year} {settings?.platformName || "Research Hub"}. All rights reserved.</p>
+          <div className="flex gap-6">
+            <AppLink to="privacy" navigate={navigate} className="hover:text-white">
+              Privacy policy
+            </AppLink>
+            <AppLink to="terms" navigate={navigate} className="hover:text-white">
+              Terms of service
+            </AppLink>
           </div>
         </div>
       </div>

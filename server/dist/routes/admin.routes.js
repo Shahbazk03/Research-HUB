@@ -13,6 +13,7 @@ import { getAdminSettings, updateAdminSettings, } from "../controllers/adminSett
 import { getAdminFaqs, createAdminFaq, updateAdminFaq, deleteAdminFaq, } from "../controllers/adminCms.controller.js";
 import { getAdminReferenceData, updateAdminReferenceData, } from "../controllers/adminReferenceData.controller.js";
 import { getAdminReferralCodes, createAdminReferralCode, updateAdminReferralCode, deleteAdminReferralCode, } from "../controllers/adminReferral.controller.js";
+import { listWriters, getWriter, createWriter, updateWriter, listEngagements, getRequestEngagements, assignWriter, getEngagement, postAdminMessage, reviewSubmission, releaseToCustomer, cancelEngagement, updatePayout, extractWriterCv, } from "../controllers/adminWriter.controller.js";
 const router = Router();
 // Protect all admin routes with authentication and staff/admin role check
 router.use(authenticate, requireStaff);
@@ -97,5 +98,22 @@ router.get("/referrals", getAdminReferralCodes);
 router.post("/referrals", requireAdmin, createAdminReferralCode);
 router.put("/referrals/:id", requireAdmin, updateAdminReferralCode);
 router.delete("/referrals/:id", requireAdmin, deleteAdminReferralCode);
+/* -------------------------------------------------------------------------- */
+/* Research writers & assignments                                             */
+/* -------------------------------------------------------------------------- */
+router.get("/writers", listWriters);
+router.post("/writers", requireAdmin, createWriter);
+router.get("/writers/:id", getWriter);
+router.put("/writers/:id", requireAdmin, updateWriter);
+router.post("/writers/:id/cv-extract", requireAdmin, extractWriterCv);
+router.get("/requests/:id/engagements", getRequestEngagements);
+router.post("/requests/:id/assign", requireAdmin, assignWriter);
+router.get("/engagements", listEngagements);
+router.get("/engagements/:id", getEngagement);
+router.post("/engagements/:id/messages", requireAdmin, postAdminMessage);
+router.post("/engagements/:id/review", requireAdmin, reviewSubmission);
+router.post("/engagements/:id/release", requireAdmin, releaseToCustomer);
+router.post("/engagements/:id/cancel", requireAdmin, cancelEngagement);
+router.post("/engagements/:id/payout", requireAdmin, updatePayout);
 export default router;
 //# sourceMappingURL=admin.routes.js.map

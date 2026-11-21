@@ -1,6 +1,7 @@
 export declare const USER_ROLES: {
     readonly CUSTOMER: "CUSTOMER";
     readonly TEAM_MEMBER: "TEAM_MEMBER";
+    readonly WRITER: "WRITER";
     readonly ADMIN: "ADMIN";
 };
 export type UserRole = (typeof USER_ROLES)[keyof typeof USER_ROLES];
