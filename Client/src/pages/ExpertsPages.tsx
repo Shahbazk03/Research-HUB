@@ -1,5 +1,4 @@
 import React, { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
 import {
   ArrowRight,
   BadgeIndianRupee,
@@ -22,8 +21,9 @@ import { AppLink, EmptyState, ErrorState, Field, PageHeader, Spinner, useDocumen
 import { ExpertCard } from "../components/ExpertCard";
 import { ACADEMIC_DESIGNATIONS, ComboInput } from "../components/ComboInput";
 import { Navigate } from "../router";
+import { usePersistedPublicQuery } from "../hooks/usePublicData";
 
-const useExperts = () => useQuery({ queryKey: ["public-experts"], queryFn: getPublicExperts, staleTime: 5 * 60 * 1000 });
+const useExperts = () => usePersistedPublicQuery("public-experts", getPublicExperts);
 
 /* -------------------------------------------------------------------------- */
 /* Home page section                                                           */

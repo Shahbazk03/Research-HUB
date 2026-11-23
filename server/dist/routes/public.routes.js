@@ -1,7 +1,10 @@
 import { Router } from "express";
 import { getPublicDomains, getPublicCategories, getPublicServices, getPublicServiceBySlugOrId, getPublicServiceTemplate, getPublicReferenceData, getPublicSettings, getPublicFaqs, } from "../controllers/publicCatalog.controller.js";
 import { getPublicExperts } from "../controllers/experts.controller.js";
+import { publicCache } from "../middleware/publicCache.js";
 const router = Router();
+// Catalogue data is the same for every visitor: answer repeat requests from memory
+router.use(["/domains", "/categories", "/services", "/reference-data", "/settings", "/faqs", "/experts"], publicCache);
 // Public routes for visitors and customers
 router.get("/domains", getPublicDomains);
 router.get("/categories", getPublicCategories);

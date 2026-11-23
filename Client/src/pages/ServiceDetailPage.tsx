@@ -1,8 +1,8 @@
 import React from "react";
 import { ArrowRight, CheckCircle2, ChevronRight, Clock, FileCheck2, Lock, ReceiptText, Users } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getPublicServiceBySlugOrId } from "../api";
-import { Category, Domain, formatServicePrice } from "../api/types";
+import { Category, Domain, Service, formatServicePrice } from "../api/types";
 import { WhatsAppButton } from "../components/common/WhatsAppButton";
 import { AppLink, EmptyState, ErrorState, PageLoader, useDocumentTitle } from "../components/ui";
 import { CtaBand } from "./HomePage";
@@ -10,10 +10,21 @@ import { IP_DOMAIN_SLUG } from "../hooks/usePublicData";
 import { Navigate } from "../router";
 
 export const ServiceDetailPage: React.FC<{ slug: string; navigate: Navigate }> = ({ slug, navigate }) => {
+  const queryClient = useQueryClient();
   const { data: service, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["service-detail", slug],
     queryFn: () => getPublicServiceBySlugOrId(slug),
     retry: (count, err: any) => err?.response?.status !== 404 && count < 1,
+    // Show the service straight away from the already-loaded catalogue while the full details arrive
+    placeholderData: () => {
+      for (const key of ["public-services-all", "public-services-featured"]) {
+        const match = queryClient
+          .getQueryData<Service[]>([key])
+          ?.find((s) => s.slug === slug || s._id === slug);
+        if (match) return match;
+      }
+      return undefined;
+    },
   });
 
   useDocumentTitle(service?.name || "Service");

@@ -2,14 +2,35 @@ import React, { Suspense, lazy, useEffect, useState } from "react";
 import { Navbar } from "./components/common/Navbar";
 import { Footer } from "./components/common/Footer";
 import { WhatsAppButton } from "./components/common/WhatsAppButton";
+import { SlowConnectionNotice } from "./components/common/SlowConnectionNotice";
 import { HomePage } from "./pages/HomePage";
-import { ServicesPage } from "./pages/ServicesPage";
-import { ServiceDetailPage } from "./pages/ServiceDetailPage";
-import { PatentsPage } from "./pages/PatentsPage";
-import { RequestWizardPage } from "./pages/RequestWizardPage";
-import { LoginPage } from "./pages/LoginPage";
-import { RegisterPage } from "./pages/RegisterPage";
-// Account areas are loaded on demand so public visitors don't download them
+import { ExpertsPage, JoinExpertsPage } from "./pages/ExpertsPages";
+import { PageLoader } from "./components/ui";
+
+/*
+| Only the home page ships in the first download. Other public pages are fetched
+| in the background once the home page is on screen, so moving around still
+| feels instant. Account areas load only after sign-in.
+*/
+const loadServicesPage = () => import("./pages/ServicesPage");
+const loadServiceDetailPage = () => import("./pages/ServiceDetailPage");
+const loadPatentsPage = () => import("./pages/PatentsPage");
+const loadRequestWizardPage = () => import("./pages/RequestWizardPage");
+const loadLoginPage = () => import("./pages/LoginPage");
+const loadRegisterPage = () => import("./pages/RegisterPage");
+const loadInfoPages = () => import("./pages/InfoPages");
+
+const ServicesPage = lazy(() => loadServicesPage().then((m) => ({ default: m.ServicesPage })));
+const ServiceDetailPage = lazy(() => loadServiceDetailPage().then((m) => ({ default: m.ServiceDetailPage })));
+const PatentsPage = lazy(() => loadPatentsPage().then((m) => ({ default: m.PatentsPage })));
+const RequestWizardPage = lazy(() => loadRequestWizardPage().then((m) => ({ default: m.RequestWizardPage })));
+const LoginPage = lazy(() => loadLoginPage().then((m) => ({ default: m.LoginPage })));
+const RegisterPage = lazy(() => loadRegisterPage().then((m) => ({ default: m.RegisterPage })));
+const AboutPage = lazy(() => loadInfoPages().then((m) => ({ default: m.AboutPage })));
+const ContactPage = lazy(() => loadInfoPages().then((m) => ({ default: m.ContactPage })));
+const LegalPage = lazy(() => loadInfoPages().then((m) => ({ default: m.LegalPage })));
+const NotFoundPage = lazy(() => loadInfoPages().then((m) => ({ default: m.NotFoundPage })));
+
 const CustomerDashboardPage = lazy(() =>
   import("./pages/CustomerDashboardPage").then((m) => ({ default: m.CustomerDashboardPage }))
 );
@@ -19,9 +40,32 @@ const WriterPortalPage = lazy(() =>
 const AdminDashboardPage = lazy(() =>
   import("./pages/AdminDashboardPage").then((m) => ({ default: m.AdminDashboardPage }))
 );
-import { AboutPage, ContactPage, LegalPage, NotFoundPage } from "./pages/InfoPages";
-import { ExpertsPage, JoinExpertsPage } from "./pages/ExpertsPages";
-import { PageLoader } from "./components/ui";
+
+const prefetchPublicPages = () => {
+  [
+    loadServicesPage,
+    loadServiceDetailPage,
+    loadRequestWizardPage,
+    loadLoginPage,
+    loadPatentsPage,
+    loadRegisterPage,
+    loadInfoPages,
+  ].forEach((load) => load().catch(() => undefined));
+};
+
+/** Run once the browser is idle after the first page is on screen. */
+const whenIdle = (task: () => void): (() => void) => {
+  const w = window as Window & {
+    requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+    cancelIdleCallback?: (id: number) => void;
+  };
+  if (w.requestIdleCallback && w.cancelIdleCallback) {
+    const id = w.requestIdleCallback(task, { timeout: 4000 });
+    return () => w.cancelIdleCallback?.(id);
+  }
+  const id = window.setTimeout(task, 2500);
+  return () => window.clearTimeout(id);
+};
 import { useAuth } from "./context/AuthContext";
 import { migrateHashUrl, navigateTo, NAVIGATION_EVENT, parseLocation, RouteParams, RouteType } from "./router";
 
@@ -46,6 +90,8 @@ export const App: React.FC = () => {
       window.removeEventListener(NAVIGATION_EVENT, sync);
     };
   }, []);
+
+  useEffect(() => whenIdle(prefetchPublicPages), []);
 
   const navigate = navigateTo;
   const isAdminView = route === "admin-dashboard";
@@ -142,6 +188,7 @@ export const App: React.FC = () => {
       </main>
       {!isAdminView && !isAuthPage && <Footer navigate={navigate} />}
       {!isAdminView && route !== "wizard" && <WhatsAppButton />}
+      <SlowConnectionNotice />
     </div>
   );
 };

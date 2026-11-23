@@ -18,6 +18,7 @@ import adminRoutes from "./routes/admin.routes.js";
 import publicRoutes from "./routes/public.routes.js";
 import uploadRoutes from "./routes/upload.routes.js";
 import writerRoutes from "./routes/writer.routes.js";
+import { invalidatePublicCacheOnWrite } from "./middleware/publicCache.js";
 
 const app: Express = express();
 
@@ -98,6 +99,9 @@ app.use(express.urlencoded({ extended: true, limit: "15mb" }));
 |--------------------------------------------------------------------------
 */
 
+// Writes that can change public pages (catalogue, settings, expert profiles) refresh the public cache
+app.use(["/api/admin", "/api/writer", "/api/auth/profile"], invalidatePublicCacheOnWrite);
+
 // Health check
 app.use("/api/health", healthRoutes);
 
@@ -125,6 +129,9 @@ app.use(
     express.static(path.join(process.cwd(), "uploads"), {
         dotfiles: "deny",
         index: false,
+        // Stored names are unique (timestamp + random) and never overwritten, so browsers can keep them
+        maxAge: "30d",
+        immutable: true,
         setHeaders: (res) => {
             // Uploaded files are data, never active content
             res.setHeader("X-Content-Type-Options", "nosniff");

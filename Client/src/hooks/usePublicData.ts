@@ -11,29 +11,73 @@ import { Domain, Service } from "../api/types";
 
 const FIVE_MIN = 5 * 60 * 1000;
 
-export const useSettings = () =>
-  useQuery({ queryKey: ["public-settings"], queryFn: getPublicSettings, staleTime: FIVE_MIN });
+/*
+| Public catalogue data (services, domains, settings, experts…) is saved in the
+| browser so a returning visitor sees the page instantly, even while the server
+| is still waking up. The saved copy is refreshed in the background whenever it
+| is older than five minutes. Only public, non-personal data is stored here.
+*/
+const STORE_PREFIX = "rh_public:";
+/** Bump when the shape of a public API response changes, so old saved copies are ignored. */
+const STORE_VERSION = 1;
+const STORE_MAX_AGE = 14 * 24 * 60 * 60 * 1000;
 
-export const useDomains = () =>
-  useQuery({ queryKey: ["public-domains"], queryFn: getPublicDomains, staleTime: FIVE_MIN });
+interface Saved<T> {
+  v: number;
+  at: number;
+  data: T;
+}
 
-export const useCategories = () =>
-  useQuery({ queryKey: ["public-categories"], queryFn: () => getPublicCategories(), staleTime: FIVE_MIN });
+const readSaved = <T,>(key: string): Saved<T> | undefined => {
+  try {
+    const raw = localStorage.getItem(STORE_PREFIX + key);
+    if (!raw) return undefined;
+    const saved = JSON.parse(raw) as Saved<T>;
+    if (saved?.v !== STORE_VERSION || typeof saved.at !== "number" || Date.now() - saved.at > STORE_MAX_AGE) {
+      return undefined;
+    }
+    return saved;
+  } catch {
+    return undefined;
+  }
+};
 
-export const useAllServices = () =>
-  useQuery({ queryKey: ["public-services-all"], queryFn: () => getPublicServices(), staleTime: FIVE_MIN });
+const writeSaved = <T,>(key: string, data: T): void => {
+  try {
+    localStorage.setItem(STORE_PREFIX + key, JSON.stringify({ v: STORE_VERSION, at: Date.now(), data }));
+  } catch {
+    // Storage full or blocked (private mode): the page still works, just without the saved copy
+  }
+};
 
-export const useFeaturedServices = () =>
+/** A public query that starts from the browser's saved copy and keeps it up to date. */
+export const usePersistedPublicQuery = <T,>(key: string, fetcher: () => Promise<T>) =>
   useQuery({
-    queryKey: ["public-services-featured"],
-    queryFn: () => getPublicServices({ featured: true }),
+    queryKey: [key],
+    queryFn: async () => {
+      const data = await fetcher();
+      writeSaved(key, data);
+      return data;
+    },
+    initialData: () => readSaved<T>(key)?.data,
+    initialDataUpdatedAt: () => readSaved<T>(key)?.at,
     staleTime: FIVE_MIN,
   });
 
-export const useFaqs = () => useQuery({ queryKey: ["public-faqs"], queryFn: getPublicFaqs, staleTime: FIVE_MIN });
+export const useSettings = () => usePersistedPublicQuery("public-settings", getPublicSettings);
 
-export const useReferenceData = () =>
-  useQuery({ queryKey: ["public-reference-data"], queryFn: getPublicReferenceData, staleTime: FIVE_MIN });
+export const useDomains = () => usePersistedPublicQuery("public-domains", getPublicDomains);
+
+export const useCategories = () => usePersistedPublicQuery("public-categories", () => getPublicCategories());
+
+export const useAllServices = () => usePersistedPublicQuery("public-services-all", () => getPublicServices());
+
+export const useFeaturedServices = () =>
+  usePersistedPublicQuery("public-services-featured", () => getPublicServices({ featured: true }));
+
+export const useFaqs = () => usePersistedPublicQuery("public-faqs", getPublicFaqs);
+
+export const useReferenceData = () => usePersistedPublicQuery("public-reference-data", getPublicReferenceData);
 
 /** Slug of the patents & IP discipline created by scripts/seed-ip-services.ts */
 export const IP_DOMAIN_SLUG = "patents-ip";
